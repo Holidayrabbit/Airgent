@@ -75,6 +75,13 @@ TUI:
 airgent tui
 ```
 
+Inside the TUI:
+
+- `Enter` sends the current prompt
+- `/` opens the command palette
+- `/resume` searches and restores a previous session
+- `Ctrl-O` toggles full execution details for thinking/tool activity
+
 
 Session inspection:
 

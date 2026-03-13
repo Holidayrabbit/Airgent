@@ -25,6 +25,7 @@ class AgentConfig(BaseModel):
     model: str
     max_turns: int
     instructions_builder: str
+    allow_high_risk_tools: bool = False
     tools: list[str]
 
 
@@ -51,7 +52,10 @@ class AgentRegistry:
 
         config = self._load_config(context.agent_key)
         instruction_builder = getattr(prompts, config.instructions_builder)
-        tools = [self.tool_registry.get(tool_key).implementation for tool_key in config.tools]
+        tools = self.tool_registry.resolve_enabled(
+            config.tools,
+            allow_high_risk_tools=config.allow_high_risk_tools,
+        )
         agent = Agent(
             name=config.key,
             instructions=instruction_builder,
