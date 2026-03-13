@@ -14,7 +14,9 @@ from prompt_toolkit.layout.containers import ConditionalContainer
 from prompt_toolkit.layout.controls import BufferControl, FormattedTextControl
 from prompt_toolkit.layout.dimension import Dimension
 from prompt_toolkit.layout.processors import ConditionalProcessor, Processor, Transformation
+from prompt_toolkit.mouse_events import MouseEvent, MouseEventType
 from prompt_toolkit.styles import Style
+from prompt_toolkit.utils import get_cwidth
 
 from app.api.schemas.agent import AgentRunRequest
 from app.agents.runner import AgentProgressEvent
@@ -33,6 +35,18 @@ class PlaceholderProcessor(Processor):
         return Transformation([("class:placeholder", self.get_placeholder())])
 
 
+class ScrollableFormattedTextControl(FormattedTextControl):
+    def __init__(self, *args, on_mouse_scroll: Callable[[MouseEvent], None] | None = None, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self.on_mouse_scroll = on_mouse_scroll
+
+    def mouse_handler(self, mouse_event: MouseEvent):
+        if self.on_mouse_scroll and mouse_event.event_type in {MouseEventType.SCROLL_UP, MouseEventType.SCROLL_DOWN}:
+            self.on_mouse_scroll(mouse_event)
+            return None
+        return super().mouse_handler(mouse_event)
+
+
 @dataclass(frozen=True)
 class SlashCommand:
     name: str
@@ -44,6 +58,12 @@ class ExecutionEntry:
     kind: str
     summary: str
     detail: str
+
+
+@dataclass(frozen=True)
+class DisplayLine:
+    style: str
+    text: str
 
 
 @dataclass
@@ -114,13 +134,11 @@ class AirgentTUI:
         self.input_buffer.on_text_changed += self._on_input_change
         self.banner = FormattedTextControl(self._render_banner)
         self.rule = FormattedTextControl(self._render_rule)
-        self.chat_panel = FormattedTextControl(self._render_chat)
+        self.chat_panel = ScrollableFormattedTextControl(self._render_chat, on_mouse_scroll=self._handle_chat_mouse)
         self.chat_window = Window(
             content=self.chat_panel,
-            wrap_lines=True,
+            wrap_lines=False,
             always_hide_cursor=True,
-            get_vertical_scroll=self._get_chat_vertical_scroll,
-            allow_scroll_beyond_bottom=True,
             style="class:screen",
         )
         self.palette_panel = FormattedTextControl(self._render_palette)
@@ -401,20 +419,19 @@ class AirgentTUI:
         return [("class:prompt", "› ")]
 
     def _render_chat(self) -> StyleAndTextTuples:
-        if not self.state.messages:
-            fragments: StyleAndTextTuples = [
-                ("class:muted", "No messages yet. Start here, or type /resume to restore a saved session.")
-            ]
+        visual_lines = self._chat_visual_lines()
+        viewport_height = self._chat_viewport_height()
+        max_scroll = max(len(visual_lines) - viewport_height, 0)
+        if self.state.follow_latest_chat:
+            self.state.chat_scroll = max_scroll
         else:
-            fragments = []
-            for role, content in self.state.messages[-18:]:
-                label_style = "class:user.label" if role == "user" else "class:assistant.label"
-                label = "You" if role == "user" else "Airgent"
-                fragments.append((label_style, f"{label}\n"))
-                fragments.append(("class:body", f"{content}\n\n"))
+            self.state.chat_scroll = min(max(self.state.chat_scroll, 0), max_scroll)
 
-        if self.state.busy:
-            fragments.extend(self._render_active_thread())
+        visible_lines = visual_lines[self.state.chat_scroll : self.state.chat_scroll + viewport_height]
+        fragments: StyleAndTextTuples = []
+        for line in visible_lines:
+            fragments.append((line.style, line.text))
+            fragments.append(("", "\n"))
         return fragments
 
     def _render_detail_panel(self) -> StyleAndTextTuples:
@@ -503,28 +520,100 @@ class AirgentTUI:
             ("class:status", self.state.status),
         ]
 
-    def _chat_max_scroll(self) -> int:
+    def _chat_source_lines(self) -> list[DisplayLine]:
+        if not self.state.messages:
+            lines = [DisplayLine("class:muted", "No messages yet. Start here, or type /resume to restore a saved session.")]
+        else:
+            lines = []
+            for role, content in self.state.messages:
+                label_style = "class:user.label" if role == "user" else "class:assistant.label"
+                label = "You" if role == "user" else "Airgent"
+                lines.append(DisplayLine(label_style, label))
+                for raw_line in content.split("\n"):
+                    lines.append(DisplayLine("class:body", raw_line))
+                lines.append(DisplayLine("", ""))
+
+        if self.state.busy:
+            lines.extend(self._active_thread_lines())
+        return lines
+
+    def _active_thread_lines(self) -> list[DisplayLine]:
+        lines = [
+            DisplayLine("class:assistant.label", "Airgent"),
+            DisplayLine("class:muted", "Working"),
+        ]
+        if not self.state.execution_log:
+            lines.append(DisplayLine("class:muted", "· Starting the run"))
+            lines.append(DisplayLine("", ""))
+            return lines
+
+        for entry in self.state.execution_log[-6:]:
+            style = {
+                "tool": "class:event.tool",
+                "thinking": "class:event.thinking",
+                "message": "class:event.message",
+                "agent": "class:event.message",
+            }.get(entry.kind, "class:event.output")
+            summary = entry.summary if len(entry.summary) <= 96 else f"{entry.summary[:93]}..."
+            lines.append(DisplayLine(style, f"· {summary}"))
+        lines.append(DisplayLine("", ""))
+        return lines
+
+    def _chat_visual_lines(self) -> list[DisplayLine]:
+        width = self._chat_viewport_width()
+        visual_lines: list[DisplayLine] = []
+        for line in self._chat_source_lines():
+            wrapped = self._wrap_line(line.text, width)
+            for wrapped_line in wrapped:
+                visual_lines.append(DisplayLine(line.style, wrapped_line))
+        return visual_lines or [DisplayLine("", "")]
+
+    def _wrap_line(self, text: str, width: int) -> list[str]:
+        if width <= 1:
+            return [text]
+        if not text:
+            return [""]
+
+        wrapped: list[str] = []
+        current: list[str] = []
+        current_width = 0
+        for char in text.expandtabs(4):
+            char_width = max(get_cwidth(char), 1)
+            if current and current_width + char_width > width:
+                wrapped.append("".join(current))
+                current = [char]
+                current_width = char_width
+                continue
+            current.append(char)
+            current_width += char_width
+        wrapped.append("".join(current))
+        return wrapped
+
+    def _chat_viewport_width(self) -> int:
         info = self.chat_window.render_info
-        if info is None:
-            return max(self.state.chat_scroll, 0)
-        return max(info.content_height - info.window_height, 0)
+        if info is not None:
+            return max(info.window_width, 20)
+        try:
+            return max(get_app().output.get_size().columns - 2, 20)
+        except Exception:
+            return 80
+
+    def _chat_viewport_height(self) -> int:
+        info = self.chat_window.render_info
+        if info is not None:
+            return max(info.window_height, 1)
+        try:
+            rows = get_app().output.get_size().rows
+        except Exception:
+            rows = 24
+        reserved = 12
+        return max(rows - reserved, 1)
+
+    def _chat_max_scroll(self) -> int:
+        return max(len(self._chat_visual_lines()) - self._chat_viewport_height(), 0)
 
     def _chat_page_size(self) -> int:
-        info = self.chat_window.render_info
-        if info is None:
-            return 8
-        return max(info.window_height - 2, 1)
-
-    def _get_chat_vertical_scroll(self, window: Window) -> int:
-        info = window.render_info
-        if info is None:
-            return max(self.state.chat_scroll, 0)
-        max_scroll = max(info.content_height - info.window_height, 0)
-        if self.state.follow_latest_chat:
-            self.state.chat_scroll = max_scroll
-        else:
-            self.state.chat_scroll = min(max(self.state.chat_scroll, 0), max_scroll)
-        return self.state.chat_scroll
+        return max(self._chat_viewport_height() - 2, 1)
 
     def _scroll_chat(self, delta: int) -> None:
         self._scroll_chat_to(self.state.chat_scroll + delta)
@@ -539,11 +628,15 @@ class AirgentTUI:
         self.state.status = "Following latest output." if self.state.follow_latest_chat else "Browsing earlier output."
         self._invalidate()
 
+    def _handle_chat_mouse(self, mouse_event: MouseEvent) -> None:
+        step = max(1, self._chat_page_size() // 3)
+        if mouse_event.event_type == MouseEventType.SCROLL_UP:
+            self._scroll_chat(-step)
+        elif mouse_event.event_type == MouseEventType.SCROLL_DOWN:
+            self._scroll_chat(step)
+
     def _after_render(self, app) -> None:
-        info = self.chat_window.render_info
-        if info is None:
-            return
-        max_scroll = max(info.content_height - info.window_height, 0)
+        max_scroll = self._chat_max_scroll()
         desired_scroll = max_scroll if self.state.follow_latest_chat else min(self.state.chat_scroll, max_scroll)
         if desired_scroll != self.state.chat_scroll:
             self.state.chat_scroll = desired_scroll

@@ -5,6 +5,7 @@ from types import SimpleNamespace
 import app.agents.runner as runner_module
 from app.agents.runner import AgentRunnerService
 from app.tui import AirgentTUI, ExecutionEntry
+from prompt_toolkit.mouse_events import MouseButton, MouseEvent, MouseEventType
 
 
 def _runner_service() -> AgentRunnerService:
@@ -108,39 +109,52 @@ def test_chat_renders_execution_in_main_thread(tmp_path) -> None:
     assert "· Drafting the response" in text
 
 
+def test_chat_source_lines_keep_full_transcript(tmp_path) -> None:
+    tui = AirgentTUI(services=_fake_services(tmp_path), agent_key="root_assistant", max_turns=8)
+    tui.state.messages = [("user", f"message {i}") for i in range(20)]
+
+    source_lines = tui._chat_source_lines()
+    rendered_text = "\n".join(line.text for line in source_lines)
+
+    assert "message 0" in rendered_text
+    assert "message 19" in rendered_text
+
+
 def test_chat_scroll_follows_latest_render_height(tmp_path) -> None:
     tui = AirgentTUI(services=_fake_services(tmp_path), agent_key="root_assistant", max_turns=8)
-    tui.chat_window.render_info = SimpleNamespace(content_height=36, window_height=10)
+    tui.chat_window.render_info = SimpleNamespace(window_height=10, window_width=80)
+    tui.state.messages = [("assistant", "\n".join(f"line {i}" for i in range(36)))]
     tui.state.follow_latest_chat = True
     tui.state.chat_scroll = 0
 
-    scroll = tui._get_chat_vertical_scroll(tui.chat_window)
+    tui._render_chat()
 
-    assert scroll == 26
-    assert tui.state.chat_scroll == 26
+    assert tui.state.chat_scroll == 28
 
 
 def test_chat_scroll_can_browse_up_and_return_to_latest(tmp_path) -> None:
     tui = AirgentTUI(services=_fake_services(tmp_path), agent_key="root_assistant", max_turns=8)
-    tui.chat_window.render_info = SimpleNamespace(content_height=30, window_height=10)
+    tui.chat_window.render_info = SimpleNamespace(window_height=10, window_width=80)
     tui._invalidate = lambda: None
-    tui.state.chat_scroll = 20
+    tui.state.messages = [("assistant", "\n".join(f"line {i}" for i in range(30)))]
+    tui.state.chat_scroll = 22
     tui.state.follow_latest_chat = True
 
     tui._scroll_chat(-5)
 
-    assert tui.state.chat_scroll == 15
+    assert tui.state.chat_scroll == 17
     assert tui.state.follow_latest_chat is False
 
     tui._scroll_chat_to(tui._chat_max_scroll(), follow_latest=True)
 
-    assert tui.state.chat_scroll == 20
+    assert tui.state.chat_scroll == 22
     assert tui.state.follow_latest_chat is True
 
 
 def test_after_render_pins_chat_to_bottom_when_following_latest(tmp_path) -> None:
     tui = AirgentTUI(services=_fake_services(tmp_path), agent_key="root_assistant", max_turns=8)
-    tui.chat_window.render_info = SimpleNamespace(content_height=42, window_height=10)
+    tui.chat_window.render_info = SimpleNamespace(window_height=10, window_width=80)
+    tui.state.messages = [("assistant", "\n".join(f"line {i}" for i in range(42)))]
     tui.state.chat_scroll = 0
     tui.state.follow_latest_chat = True
 
@@ -152,13 +166,14 @@ def test_after_render_pins_chat_to_bottom_when_following_latest(tmp_path) -> Non
 
     tui._after_render(FakeApp())
 
-    assert tui.state.chat_scroll == 32
+    assert tui.state.chat_scroll == 34
     assert invalidated["count"] == 1
 
 
 def test_after_render_clamps_manual_scroll_when_height_shrinks(tmp_path) -> None:
     tui = AirgentTUI(services=_fake_services(tmp_path), agent_key="root_assistant", max_turns=8)
-    tui.chat_window.render_info = SimpleNamespace(content_height=18, window_height=10)
+    tui.chat_window.render_info = SimpleNamespace(window_height=10, window_width=80)
+    tui.state.messages = [("assistant", "\n".join(f"line {i}" for i in range(18)))]
     tui.state.chat_scroll = 20
     tui.state.follow_latest_chat = False
 
@@ -170,5 +185,27 @@ def test_after_render_clamps_manual_scroll_when_height_shrinks(tmp_path) -> None
 
     tui._after_render(FakeApp())
 
-    assert tui.state.chat_scroll == 8
+    assert tui.state.chat_scroll == 10
     assert invalidated["count"] == 1
+
+
+def test_mouse_scroll_moves_chat_viewport(tmp_path) -> None:
+    tui = AirgentTUI(services=_fake_services(tmp_path), agent_key="root_assistant", max_turns=8)
+    tui.chat_window.render_info = SimpleNamespace(window_height=10, window_width=80)
+    tui._invalidate = lambda: None
+    tui.state.messages = [("assistant", "\n".join(f"line {i}" for i in range(30)))]
+    tui.state.chat_scroll = 22
+    tui.state.follow_latest_chat = True
+
+    tui._handle_chat_mouse(
+        MouseEvent(position=SimpleNamespace(x=0, y=0), event_type=MouseEventType.SCROLL_UP, button=MouseButton.LEFT, modifiers=())
+    )
+
+    assert tui.state.chat_scroll == 20
+    assert tui.state.follow_latest_chat is False
+
+    tui._handle_chat_mouse(
+        MouseEvent(position=SimpleNamespace(x=0, y=0), event_type=MouseEventType.SCROLL_DOWN, button=MouseButton.LEFT, modifiers=())
+    )
+
+    assert tui.state.chat_scroll == 22
