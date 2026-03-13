@@ -1,0 +1,64 @@
+from __future__ import annotations
+
+from typing import Any
+
+from app.agents.context import AgentRunContext
+
+try:
+    from agents import Agent, RunContextWrapper
+except ImportError:  # pragma: no cover
+    Agent = object  # type: ignore[assignment]
+
+    class RunContextWrapper:  # type: ignore[override]
+        context: AgentRunContext
+
+
+BASE_ROOT_INSTRUCTIONS = """
+You are Airgent, a personal AI operating system for an individual user.
+
+Your responsibilities:
+1. Answer the user's request directly when no tool is needed.
+2. Use memory tools to recall stable preferences, ongoing projects, and prior commitments.
+3. Use skill tools when a task needs a reusable workflow or domain playbook.
+4. Keep responses concise, practical, and honest about uncertainty.
+
+Memory policy:
+- Search memory before assuming prior preferences or long-running context.
+- Save durable facts only when the user explicitly asks to remember them, or when a preference/project detail is clearly stable and useful later.
+- Do not store secrets, credentials, or one-off ephemeral details unless the user explicitly requests it.
+
+Skill policy:
+- Discover relevant skills with `list_skills`.
+- Load a skill with `load_skill` only when it clearly matches the task.
+- After loading a skill, follow it.
+
+Behavior rules:
+- Never fabricate tool results or prior history.
+- Treat the local transcript as the source of short-term memory.
+- Use long-term memory to personalize, not to override the current request.
+- If memory seems stale or conflicting, call it out and ask for confirmation.
+""".strip()
+
+
+def _render_memory_block(context: AgentRunContext) -> str:
+    if not context.context_snapshot.memories:
+        return "No relevant long-term memory was found for this request."
+
+    lines = ["Relevant long-term memory:"]
+    for memory in context.context_snapshot.memories:
+        tags = f" [tags: {', '.join(memory.tags)}]" if memory.tags else ""
+        lines.append(f"- {memory.content}{tags}")
+    return "\n".join(lines)
+
+
+def build_root_instructions(
+    wrapper: RunContextWrapper[AgentRunContext],
+    _: Agent[Any] | None = None,
+) -> str:
+    context = wrapper.context
+    parts = [
+        BASE_ROOT_INSTRUCTIONS,
+        f"Current session_id: {context.session_id}",
+        _render_memory_block(context),
+    ]
+    return "\n\n".join(parts)

@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Airgent</title>
+    <link rel="stylesheet" href="/static/style.css" />
+  </head>
+  <body>
+    <div class="page-shell">
+      <aside class="sidebar">
+        <div>
+          <p class="eyebrow">Local-first agent base</p>
+          <h1>Airgent</h1>
+          <p class="sidebar-copy">
+            CLI, API, and a small web surface on top of the same local session and memory store.
+          </p>
+        </div>
+        <button id="new-chat-button" class="secondary-button" type="button">New Chat</button>
+        <section>
+          <div class="section-head">
+            <h2>Sessions</h2>
+            <button id="refresh-sessions-button" class="ghost-button" type="button">Refresh</button>
+          </div>
+          <div id="sessions-list" class="stack"></div>
+        </section>
+        <section>
+          <div class="section-head">
+            <h2>Memory</h2>
+            <button id="refresh-memory-button" class="ghost-button" type="button">Refresh</button>
+          </div>
+          <div id="memory-list" class="stack"></div>
+        </section>
+      </aside>
+
+      <main class="chat-pane">
+        <div class="chat-header">
+          <div>
+            <p class="eyebrow">Session</p>
+            <h2 id="session-title">New chat</h2>
+          </div>
+          <div id="session-badge" class="session-badge">No session yet</div>
+        </div>
+        <div id="messages" class="messages"></div>
+        <form id="composer" class="composer">
+          <textarea
+            id="message-input"
+            name="message"
+            rows="4"
+            placeholder="Ask Airgent anything..."
+          ></textarea>
+          <div class="composer-actions">
+            <p id="status-line" class="status-line">Ready</p>
+            <button id="send-button" class="primary-button" type="submit">Send</button>
+          </div>
+        </form>
+      </main>
+    </div>
+
+    <script src="/static/app.js" defer></script>
+  </body>
+  </html>

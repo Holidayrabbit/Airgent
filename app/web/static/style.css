@@ -1,0 +1,237 @@
+:root {
+  --bg: #f4efe4;
+  --panel: rgba(255, 252, 246, 0.84);
+  --panel-strong: #fffaf1;
+  --ink: #1a1916;
+  --muted: #6b6257;
+  --line: rgba(26, 25, 22, 0.12);
+  --accent: #c55b2d;
+  --accent-deep: #8e3315;
+  --shadow: 0 24px 80px rgba(77, 43, 26, 0.16);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  color: var(--ink);
+  font-family: "Iowan Old Style", "Palatino Linotype", "Book Antiqua", serif;
+  background:
+    radial-gradient(circle at top left, rgba(197, 91, 45, 0.15), transparent 24rem),
+    radial-gradient(circle at bottom right, rgba(142, 51, 21, 0.12), transparent 20rem),
+    linear-gradient(180deg, #f8f2e8 0%, #efe7d7 100%);
+}
+
+.page-shell {
+  display: grid;
+  grid-template-columns: 320px minmax(0, 1fr);
+  min-height: 100vh;
+}
+
+.sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  padding: 1.5rem;
+  border-right: 1px solid var(--line);
+  background: rgba(255, 248, 236, 0.7);
+  backdrop-filter: blur(14px);
+}
+
+.sidebar h1,
+.chat-header h2,
+.section-head h2 {
+  margin: 0;
+  font-weight: 700;
+}
+
+.sidebar-copy,
+.status-line,
+.session-card p,
+.memory-card p {
+  color: var(--muted);
+}
+
+.eyebrow {
+  margin: 0 0 0.35rem;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  font-size: 0.74rem;
+  color: var(--accent-deep);
+}
+
+.section-head,
+.composer-actions,
+.chat-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.session-card,
+.memory-card,
+.message {
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: var(--panel);
+  box-shadow: var(--shadow);
+}
+
+.session-card,
+.memory-card {
+  padding: 0.9rem 1rem;
+  cursor: pointer;
+  transition: transform 160ms ease, border-color 160ms ease;
+}
+
+.session-card:hover,
+.memory-card:hover {
+  transform: translateY(-1px);
+  border-color: rgba(197, 91, 45, 0.45);
+}
+
+.session-card.active {
+  border-color: rgba(197, 91, 45, 0.75);
+  background: var(--panel-strong);
+}
+
+.chat-pane {
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  gap: 1rem;
+  padding: 1.5rem;
+}
+
+.session-badge {
+  padding: 0.55rem 0.8rem;
+  border-radius: 999px;
+  background: rgba(197, 91, 45, 0.1);
+  color: var(--accent-deep);
+  font-size: 0.9rem;
+}
+
+.messages {
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+  overflow: auto;
+  padding-right: 0.2rem;
+}
+
+.message {
+  padding: 1rem 1.1rem;
+  animation: rise 220ms ease;
+}
+
+.message.user {
+  background: rgba(255, 245, 227, 0.95);
+}
+
+.message.assistant {
+  background: rgba(255, 252, 246, 0.92);
+}
+
+.message-role {
+  margin: 0 0 0.4rem;
+  font-size: 0.82rem;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--accent-deep);
+}
+
+.message-content {
+  margin: 0;
+  white-space: pre-wrap;
+  line-height: 1.5;
+}
+
+.composer {
+  display: flex;
+  flex-direction: column;
+  gap: 0.8rem;
+  padding: 1rem;
+  border: 1px solid var(--line);
+  border-radius: 22px;
+  background: rgba(255, 250, 240, 0.92);
+  box-shadow: var(--shadow);
+}
+
+textarea {
+  width: 100%;
+  resize: vertical;
+  min-height: 110px;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+}
+
+button {
+  border: 0;
+  font: inherit;
+  cursor: pointer;
+}
+
+.primary-button,
+.secondary-button,
+.ghost-button {
+  border-radius: 999px;
+  transition: transform 160ms ease, opacity 160ms ease;
+}
+
+.primary-button:hover,
+.secondary-button:hover,
+.ghost-button:hover {
+  transform: translateY(-1px);
+}
+
+.primary-button {
+  padding: 0.8rem 1.2rem;
+  background: linear-gradient(135deg, var(--accent), var(--accent-deep));
+  color: white;
+}
+
+.secondary-button {
+  padding: 0.8rem 1rem;
+  background: rgba(26, 25, 22, 0.06);
+  color: var(--ink);
+}
+
+.ghost-button {
+  padding: 0.45rem 0.7rem;
+  background: transparent;
+  color: var(--accent-deep);
+}
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (max-width: 960px) {
+  .page-shell {
+    grid-template-columns: 1fr;
+  }
+
+  .sidebar {
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+}
