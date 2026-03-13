@@ -1,6 +1,6 @@
 # Airgent
 
-![Airgent](public/airgent.png)
+![Airgent](public/Airgent.png)
 
 Airgent is a local-first agent base system. It exposes the same runtime through:
 
