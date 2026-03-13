@@ -4,6 +4,9 @@ model: gpt-4.1-mini
 max_turns: 12
 instructions_builder: build_root_instructions
 tools:
+  - read_file
+  - create_file
+  - edit_file
   - search_memory
   - remember_note
   - list_skills

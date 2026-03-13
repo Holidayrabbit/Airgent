@@ -41,7 +41,7 @@ Conversation history, transcripts, and long-term memory are persisted locally in
 - [app/bootstrap.py](/Users/zq/work/MyProj/Airgent/app/bootstrap.py)
   Central place that wires settings, OpenAI client config, store, session factory, tool registry, and runner.
 - [app/core/config.py](/Users/zq/work/MyProj/Airgent/app/core/config.py)
-  Loads runtime configuration from environment and `.env`.
+  Loads runtime configuration from environment and `.env`, including project root and project-local skills path.
 - [app/core/openai_config.py](/Users/zq/work/MyProj/Airgent/app/core/openai_config.py)
   Configures the OpenAI Agents SDK with explicit `AsyncOpenAI` client settings.
 
@@ -75,6 +75,8 @@ Conversation history, transcripts, and long-term memory are persisted locally in
 
 - [app/tools/memory_tools.py](/Users/zq/work/MyProj/Airgent/app/tools/memory_tools.py)
   Exposes `search_memory` and `remember_note`.
+- [app/tools/file_tools.py](/Users/zq/work/MyProj/Airgent/app/tools/file_tools.py)
+  Exposes `read_file`, `create_file`, and `edit_file`, restricted to the current project root.
 - [app/tools/skill_tools.py](/Users/zq/work/MyProj/Airgent/app/tools/skill_tools.py)
   Exposes local skill discovery and loading.
 - [app/tools/registry.py](/Users/zq/work/MyProj/Airgent/app/tools/registry.py)
@@ -116,8 +118,11 @@ Logical data groups:
 
 ## Skills
 
-Local skills live in [skills/](/Users/zq/work/MyProj/Airgent/skills).  
-The current built-in example is [skills/context-builder/SKILL.md](/Users/zq/work/MyProj/Airgent/skills/context-builder/SKILL.md), which documents how the agent should use transcript context and long-term memory.
+Local skills live in the active project under:
+
+```text
+.agents/skills
+```
 
 ## Current Design Choices
 
@@ -125,7 +130,7 @@ The current built-in example is [skills/context-builder/SKILL.md](/Users/zq/work
 - Shared runtime for CLI, API, and WebUI
 - Local SQLite instead of Redis or Langfuse
 - One root agent for V1, configured via YAML
-- Minimal tool surface: memory + skills first
+- Minimal tool surface: files + memory + skills
 - Proxy-friendly OpenAI client setup via `OPENAI_BASE_URL` and `chat_completions`
 
 ## Current Limitations

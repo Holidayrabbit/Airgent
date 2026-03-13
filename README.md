@@ -10,6 +10,8 @@ Airgent is a local-first agent base system. It exposes the same runtime through:
 
 The runtime uses the OpenAI Agents SDK for orchestration, keeps short-term conversation history in a local SQLite-backed session store, and persists long-term memory locally.
 
+When Airgent starts inside a project directory, that directory becomes the active workspace. Project-local skills are loaded from `.agents/skills`.
+
 ## Stack
 
 - Python 3.11+
@@ -30,6 +32,29 @@ uv run airgent serve --reload
 
 Then open `http://127.0.0.1:8000`.
 
+## Global Install
+
+You do not need to create a virtual environment manually for normal use.
+
+Install Airgent globally with `uv`:
+
+```bash
+sh scripts/install.sh
+```
+
+Or:
+
+```bash
+uv tool install --force .
+```
+
+Then you can run:
+
+```bash
+airgent tui
+airgent serve
+```
+
 ## CLI
 
 One-shot:
@@ -47,23 +72,23 @@ uv run airgent chat
 TUI:
 
 ```bash
-uv run airgent tui
+airgent tui
 ```
 
 
 Session inspection:
 
 ```bash
-uv run airgent sessions list
-uv run airgent sessions show <session-id>
+airgent sessions list
+airgent sessions show <session-id>
 ```
 
 Memory inspection:
 
 ```bash
-uv run airgent memory list
-uv run airgent memory search "uv python"
-uv run airgent memory add "The user prefers uv for Python envs" --tags python,tooling
+airgent memory list
+airgent memory search "uv python"
+airgent memory add "The user prefers uv for Python envs" --tags python,tooling
 ```
 
 ## API
@@ -93,7 +118,7 @@ curl http://127.0.0.1:8000/api/v1/memories
 ## Notes
 
 - Local data defaults to `~/.airgent/airgent.db`.
-- The default skill set includes a `context-builder` workflow for memory usage.
+- Project-local skills default to `./.agents/skills`.
 - `uv` is the intended workflow for dependency management and execution.
 - `.env` is loaded automatically. These keys are supported:
 
@@ -106,6 +131,14 @@ OPENAI_API_MODE=chat_completions
 - Airgent now configures the Agents SDK with an explicit `AsyncOpenAI` client, so proxy `base_url` settings are applied consistently for both CLI and API.
 - `OPENAI_API_MODE` defaults to `chat_completions`, because proxy services are usually more compatible with that mode than `responses`.
 - SDK tracing is disabled by default because this project persists conversations locally instead of relying on hosted tracing.
+- Current root agent tools are:
+  - `read_file`
+  - `create_file`
+  - `edit_file`
+  - `search_memory`
+  - `remember_note`
+  - `list_skills`
+  - `load_skill`
 
 ## license
 

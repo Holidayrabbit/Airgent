@@ -34,9 +34,10 @@ class Settings(BaseSettings):
     default_model: str = "gpt-4o"
     default_max_turns: int = 12
 
+    project_root: Path = Field(default_factory=Path.cwd)
     data_dir: Path = Field(default=Path.home() / ".airgent")
     db_path: Path | None = None
-    skills_root: Path = Path(__file__).resolve().parents[2] / "skills"
+    skills_root: Path | None = None
     session_history_limit: int = 40
     transcript_context_limit: int = 6
     memory_search_limit: int = 5
@@ -44,6 +45,7 @@ class Settings(BaseSettings):
     openai_agents_disable_tracing: bool = True
 
     def ensure_directories(self) -> None:
+        self.project_root.mkdir(parents=True, exist_ok=True)
         self.data_dir.mkdir(parents=True, exist_ok=True)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self.skills_root.mkdir(parents=True, exist_ok=True)
@@ -52,8 +54,11 @@ class Settings(BaseSettings):
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
     settings = Settings()
+    settings.project_root = settings.project_root.expanduser().resolve()
     settings.data_dir = settings.data_dir.expanduser().resolve()
     settings.db_path = (settings.db_path or settings.data_dir / "airgent.db").expanduser().resolve()
-    settings.skills_root = settings.skills_root.expanduser().resolve()
+    settings.skills_root = (
+        (settings.skills_root or settings.project_root / ".agents" / "skills").expanduser().resolve()
+    )
     settings.ensure_directories()
     return settings
