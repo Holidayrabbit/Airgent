@@ -86,11 +86,15 @@ class AgentRunnerService:
                 details={"agent_key": request.agent_key},
             ) from exc
         except Exception as exc:
+            reason = str(exc).strip()
             raise AppError(
                 code="agent_run_failed",
-                message="Agent execution failed.",
+                message=f"Agent execution failed: {reason}" if reason else "Agent execution failed.",
                 status_code=500,
-                details={"type": exc.__class__.__name__},
+                details={
+                    "type": exc.__class__.__name__,
+                    "reason": reason,
+                },
             ) from exc
 
         final_output = self._stringify_output(result.final_output)

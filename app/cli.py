@@ -9,6 +9,7 @@ from app.api.schemas.agent import AgentRunRequest
 from app.bootstrap import build_services
 from app.core.config import get_settings
 from app.core.errors import AppError
+from app.tui import run_tui
 
 app = typer.Typer(
     help="Airgent: local-first personal agent runtime with CLI, API, and WebUI.",
@@ -90,6 +91,17 @@ def chat(
         )
         active_session_id = result.session_id
         typer.echo(f"Airgent [{active_session_id}] > {result.output}")
+
+
+@app.command()
+def tui(
+    agent_key: str = typer.Option(get_settings().default_agent_key, "--agent", help="Agent config key."),
+    max_turns: int | None = typer.Option(None, "--max-turns", min=1, max=50, help="Max SDK turns."),
+) -> None:
+    """Open the full-screen terminal UI."""
+
+    services = build_services()
+    asyncio.run(run_tui(services=services, agent_key=agent_key, max_turns=max_turns))
 
 
 @sessions_app.command("list")

@@ -26,12 +26,12 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("OPENAI_BASE_URL", "OPENAI_API_BASE"),
     )
     openai_api_mode: str = Field(
-        default="responses",
+        default="chat_completions",
         validation_alias=AliasChoices("OPENAI_API_MODE", "AIRGENT_OPENAI_API_MODE"),
     )
 
     default_agent_key: str = "root_assistant"
-    default_model: str = "gpt-4.1-mini"
+    default_model: str = "gpt-4o"
     default_max_turns: int = 12
 
     data_dir: Path = Field(default=Path.home() / ".airgent")

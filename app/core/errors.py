@@ -14,6 +14,9 @@ class AppError(Exception):
     status_code: int = 400
     details: dict[str, Any] = field(default_factory=dict)
 
+    def __str__(self) -> str:
+        return self.message
+
     def to_dict(self) -> dict[str, Any]:
         payload: dict[str, Any] = {
             "error": {

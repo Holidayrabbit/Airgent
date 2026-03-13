@@ -1,6 +1,6 @@
 # Airgent
 
-![Airgent](./public/airgent.png)
+![Airgent](public/airgent.png)
 
 Airgent is a local-first agent base system. It exposes the same runtime through:
 
@@ -44,6 +44,13 @@ Interactive:
 uv run airgent chat
 ```
 
+TUI:
+
+```bash
+uv run airgent tui
+```
+
+
 Session inspection:
 
 ```bash
@@ -83,21 +90,6 @@ List memory:
 curl http://127.0.0.1:8000/api/v1/memories
 ```
 
-## Layout
-
-```text
-app/
-  agents/      Agent config, prompts, registry, runner
-  api/         FastAPI routes and schemas
-  core/        Config, logging, errors
-  memory/      SQLite persistence and context assembly
-  sessions/    OpenAI Agents SDK session adapter
-  tools/       Memory and skill tools
-  web/         Static WebUI
-skills/        Local workflow skills the agent can load
-tests/         Basic persistence test
-```
-
 ## Notes
 
 - Local data defaults to `~/.airgent/airgent.db`.
@@ -112,5 +104,9 @@ OPENAI_API_MODE=chat_completions
 ```
 
 - Airgent now configures the Agents SDK with an explicit `AsyncOpenAI` client, so proxy `base_url` settings are applied consistently for both CLI and API.
+- `OPENAI_API_MODE` defaults to `chat_completions`, because proxy services are usually more compatible with that mode than `responses`.
 - SDK tracing is disabled by default because this project persists conversations locally instead of relying on hosted tracing.
 
+## license
+
+MIT

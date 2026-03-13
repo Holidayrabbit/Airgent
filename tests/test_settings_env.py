@@ -27,3 +27,13 @@ def test_settings_read_openai_values_from_env_file(tmp_path: Path, monkeypatch) 
     assert settings.openai_api_key == "test-key"
     assert settings.openai_base_url == "https://proxy.example.com/v1"
     assert settings.openai_api_mode == "chat_completions"
+
+
+def test_default_openai_api_mode_is_proxy_friendly(monkeypatch) -> None:
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("OPENAI_BASE_URL", raising=False)
+    monkeypatch.delenv("OPENAI_API_MODE", raising=False)
+
+    settings = Settings()
+
+    assert settings.openai_api_mode == "chat_completions"
