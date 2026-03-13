@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Callable
@@ -22,6 +23,55 @@ from app.api.schemas.agent import AgentRunRequest
 from app.agents.runner import AgentProgressEvent
 from app.bootstrap import AppServices
 from app.memory.store import SessionSummary
+
+_ANSI_COLOR_RGB: dict[int, tuple[int, int, int]] = {
+    0: (0, 0, 0),
+    1: (205, 0, 0),
+    2: (0, 205, 0),
+    3: (205, 205, 0),
+    4: (0, 0, 238),
+    5: (205, 0, 205),
+    6: (0, 205, 205),
+    7: (229, 229, 229),
+    8: (127, 127, 127),
+    9: (255, 0, 0),
+    10: (0, 255, 0),
+    11: (255, 255, 0),
+    12: (92, 92, 255),
+    13: (255, 0, 255),
+    14: (0, 255, 255),
+    15: (255, 255, 255),
+}
+
+
+def _is_light_color(rgb: tuple[int, int, int]) -> bool:
+    red, green, blue = rgb
+    # Relative luminance threshold tuned for ANSI terminal palettes.
+    return (0.2126 * red) + (0.7152 * green) + (0.0722 * blue) >= 186
+
+
+def _terminal_uses_light_background() -> bool:
+    override = os.environ.get("AIRGENT_TUI_THEME", "").strip().lower()
+    if override in {"light", "dark"}:
+        return override == "light"
+
+    colorfgbg = os.environ.get("COLORFGBG", "")
+    if colorfgbg:
+        parts = [part for part in colorfgbg.split(";") if part.isdigit()]
+        if parts:
+            bg_index = int(parts[-1])
+            rgb = _ANSI_COLOR_RGB.get(bg_index)
+            if rgb is not None:
+                return _is_light_color(rgb)
+
+    for env_name in ("TERMINAL_THEME", "THEME", "ITERM_PROFILE", "TERM_PROGRAM_THEME"):
+        value = os.environ.get(env_name, "").lower()
+        if "light" in value:
+            return True
+        if "dark" in value:
+            return False
+
+    return False
 
 
 class PlaceholderProcessor(Processor):
@@ -166,6 +216,7 @@ class AirgentTUI:
         )
 
     def _build_style(self) -> Style:
+        pet_style = "#202020 bold" if _terminal_uses_light_background() else "#d8d8d8 bold"
         return Style.from_dict(
             {
                 "": "",
@@ -173,7 +224,7 @@ class AirgentTUI:
                 "banner.title": "bold",
                 "banner.meta": "ansibrightblack",
                 "banner.path": "ansicyan",
-                "banner.pet": "#d99672",
+                "banner.pet": pet_style,
                 "rule": "ansibrightblack",
                 "prompt": "bold",
                 "placeholder": "ansibrightblack italic",
@@ -391,15 +442,15 @@ class AirgentTUI:
         project_root = str(self.state.services.settings.project_root)
         session_label = self.state.active_session_id or "new"
         pet_lines = [
-            "  .==.  ",
-            " [oooo] ",
-            " [|__|] ",
-            " /|  |\\ ",
-            "  /  \\  ",
+            " ███  █████ ████   ████ █████ █   █ █████",
+            "█   █   █   █   █ █     █     ██  █   █  ",
+            "█████   █   ████  █ ███ ████  █ █ █   █  ",
+            "█   █   █   █  █  █   █ █     █  ██   █  ",
+            "█   █ █████ █   █  ███  █████ █   █   █  ",
         ]
         fragments: StyleAndTextTuples = []
         info_lines = [
-            ("class:banner.title", "airgent"),
+            ("class:banner.title", "AIRGENT"),
             ("class:banner.meta", f"{self.state.agent_key}  ·  local-first agent runtime"),
             ("class:banner.path", project_root),
             ("class:banner.meta", "Type /resume to continue a previous conversation"),
