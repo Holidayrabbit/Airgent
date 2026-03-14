@@ -46,6 +46,12 @@ class AgentRegistry:
             raise KeyError(agent_key)
         return AgentConfig.model_validate(yaml.safe_load(config_path.read_text(encoding="utf-8")))
 
+    def list_configs(self) -> list[AgentConfig]:
+        configs: list[AgentConfig] = []
+        for config_path in sorted(CONFIGS_DIR.glob("*.yaml")):
+            configs.append(AgentConfig.model_validate(yaml.safe_load(config_path.read_text(encoding="utf-8"))))
+        return configs
+
     def build(self, context: AgentRunContext) -> tuple[object, RuntimeSpec]:
         if Agent is None or ModelSettings is None:
             raise RuntimeError("openai-agents is not installed.")

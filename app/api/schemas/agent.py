@@ -20,3 +20,10 @@ class AgentRunResponse(BaseModel):
     agent_key: str
     output: str
     context: dict[str, Any]
+
+
+class AgentOptionResponse(BaseModel):
+    key: str
+    model: str
+    version: str
+    is_default: bool

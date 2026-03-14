@@ -49,6 +49,7 @@ async def get_session(request: Request, session_id: str) -> SessionDetailRespons
                 content=message.content,
                 agent_key=message.agent_key,
                 created_at=message.created_at,
+                metadata=message.metadata,
             )
             for message in messages
         ],

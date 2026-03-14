@@ -122,6 +122,7 @@ class AgentRunnerService:
             summary="run started",
             session_id=session.session_id,
         )
+        thread_events: list[dict[str, str]] = []
 
         try:
             result = Runner.run_streamed(
@@ -134,6 +135,8 @@ class AgentRunnerService:
             async for event in result.stream_events():
                 progress = self._serialize_progress_event(event)
                 if progress is not None:
+                    if progress.kind not in {"status", "completed"}:
+                        self._record_thread_event(thread_events, progress)
                     yield progress
         except KeyError as exc:
             raise AppError(
@@ -151,6 +154,7 @@ class AgentRunnerService:
             role="assistant",
             content=final_output,
             agent_key=request.agent_key,
+            metadata={"thread_events": thread_events},
         )
         yield AgentProgressEvent(
             kind="completed",
@@ -226,6 +230,17 @@ class AgentRunnerService:
             )
 
         return None
+
+    def _record_thread_event(self, thread_events: list[dict[str, str]], event: AgentProgressEvent) -> None:
+        entry = {
+            "kind": event.kind,
+            "summary": event.summary,
+            "detail": event.detail,
+        }
+        if thread_events and thread_events[-1]["kind"] == entry["kind"] and thread_events[-1]["summary"] == entry["summary"]:
+            thread_events[-1] = entry
+            return
+        thread_events.append(entry)
 
     def _tool_called_event(self, raw_item: Any) -> AgentProgressEvent:
         tool_name = self._read_attr(raw_item, "name") or "tool"

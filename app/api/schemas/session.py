@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Any
+
 from pydantic import BaseModel
 
 
@@ -18,6 +20,7 @@ class TranscriptMessageResponse(BaseModel):
     content: str
     agent_key: str
     created_at: str
+    metadata: dict[str, Any]
 
 
 class SessionDetailResponse(BaseModel):

@@ -10,22 +10,19 @@
     <div class="page-shell">
       <aside class="sidebar">
         <div class="sidebar-top">
-          <h1>Airgent</h1>
-          <p class="sidebar-copy">
-            Developer:
-            <a href="https://github.com/Holidayrabbit" target="_blank" rel="noreferrer">Fulin Zhao</a>
-            <br />
-            Repository:
+          <h1>
             <a
+              class="sidebar-title-link"
               href="https://github.com/Holidayrabbit/Airgent?tab=readme-ov-file"
               target="_blank"
               rel="noreferrer"
+              aria-label="Open Airgent repository on GitHub"
+              title="Open Airgent repository on GitHub"
             >
-              github.com/Holidayrabbit/Airgent
+              Airgent
             </a>
-          </p>
+          </h1>
         </div>
-        <button id="new-chat-button" class="secondary-button" type="button">New Chat</button>
 
         <div class="sidebar-sections">
           <section class="sidebar-section sidebar-section-grow">
@@ -52,7 +49,13 @@
             <p class="eyebrow">Session</p>
             <h2 id="session-title">New chat</h2>
           </div>
-          <div id="session-badge" class="session-badge">No session yet</div>
+          <div class="chat-header-actions">
+            <label class="agent-picker" for="agent-select">
+              <span>Agent</span>
+              <select id="agent-select" name="agent"></select>
+            </label>
+            <button id="new-chat-button" class="secondary-button" type="button">New Chat</button>
+          </div>
         </div>
 
         <section class="thread-panel">
@@ -66,12 +69,11 @@
           <textarea
             id="message-input"
             name="message"
-            rows="4"
+            rows="3"
             placeholder="Ask Airgent anything..."
           ></textarea>
           <div class="composer-actions">
-            <p id="status-line" class="status-line">Ready</p>
-            <button id="send-button" class="primary-button" type="submit">Send</button>
+            <button id="send-button" class="primary-button composer-send" type="submit" aria-label="Send message">&uarr;</button>
           </div>
         </form>
       </main>
