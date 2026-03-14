@@ -1,5 +1,6 @@
 const state = {
   sessionId: null,
+  sessions: [],
 };
 
 const elements = {
@@ -33,7 +34,7 @@ function renderMessages(messages) {
     empty.className = "message assistant";
     empty.innerHTML = `
       <p class="message-role">Airgent</p>
-      <p class="message-content">Start a conversation. Sessions and memory stay on your machine.</p>
+      <p class="message-content">Welcome to start a conversation~</p>
     `;
     elements.messages.appendChild(empty);
     return;
@@ -53,6 +54,7 @@ function renderMessages(messages) {
 }
 
 function renderSessions(sessions) {
+  state.sessions = sessions;
   elements.sessionsList.innerHTML = "";
   if (!sessions.length) {
     elements.sessionsList.textContent = "No saved sessions yet.";
@@ -62,11 +64,11 @@ function renderSessions(sessions) {
   for (const session of sessions) {
     const button = document.createElement("button");
     button.type = "button";
-    button.className = `session-card${session.session_id === state.sessionId ? " active" : ""}`;
-    button.innerHTML = `
-      <strong>${session.title}</strong>
-      <p>${session.last_message ?? "No messages yet."}</p>
-    `;
+    button.className = `session-row${session.session_id === state.sessionId ? " active" : ""}`;
+    const preview = (session.last_message ?? "No messages yet.").replace(/\s+/g, " ").trim();
+    button.innerHTML = `<span class="session-row-title"></span>`;
+    button.querySelector(".session-row-title").textContent = session.title;
+    button.title = preview;
     button.addEventListener("click", () => loadSession(session.session_id));
     elements.sessionsList.appendChild(button);
   }
@@ -115,7 +117,8 @@ async function loadMemory() {
 async function loadSession(sessionId) {
   const session = await fetchJson(`/api/v1/sessions/${sessionId}`);
   state.sessionId = session.session_id;
-  elements.sessionTitle.textContent = `Session ${session.session_id}`;
+  const selected = state.sessions.find((item) => item.session_id === session.session_id);
+  elements.sessionTitle.textContent = selected?.title ?? `Session ${session.session_id}`;
   elements.sessionBadge.textContent = session.session_id;
   renderMessages(session.messages);
   await loadSessions();
@@ -134,7 +137,8 @@ async function sendMessage(message) {
       }),
     });
     state.sessionId = result.session_id;
-    elements.sessionTitle.textContent = `Session ${result.session_id}`;
+    const selected = state.sessions.find((item) => item.session_id === result.session_id);
+    elements.sessionTitle.textContent = selected?.title ?? `Session ${result.session_id}`;
     elements.sessionBadge.textContent = result.session_id;
     await Promise.all([loadSession(result.session_id), loadMemory()]);
     setStatus(`Done. ${result.context.memory_hits} memory hits used.`);

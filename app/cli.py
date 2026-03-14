@@ -39,7 +39,7 @@ async def _run_once(message: str, *, session_id: str | None, agent_key: str, max
 @app.command()
 def serve(
     host: str = typer.Option("127.0.0.1", help="Bind host."),
-    port: int = typer.Option(8000, min=1, max=65535, help="Bind port."),
+    port: int = typer.Option(10304, min=1, max=65535, help="Bind port."),
     reload: bool = typer.Option(False, "--reload", help="Enable auto reload."),
 ) -> None:
     """Start the HTTP API and WebUI."""

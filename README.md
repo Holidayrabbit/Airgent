@@ -30,7 +30,7 @@ export OPENAI_BASE_URL=https://xxx.example.com/v1
 uv run airgent serve --reload
 ```
 
-Then open `http://127.0.0.1:8000`.
+Then open `http://127.0.0.1:10304`.
 
 ## Global Install
 
@@ -103,7 +103,7 @@ airgent memory add "The user prefers uv for Python envs" --tags python,tooling
 Run the agent:
 
 ```bash
-curl -X POST http://127.0.0.1:8000/api/v1/agent/run \
+curl -X POST http://127.0.0.1:10304/api/v1/agent/run \
   -H 'Content-Type: application/json' \
   -d '{
     "input": "总结一下 Airgent 这个项目该怎么设计"
@@ -113,13 +113,13 @@ curl -X POST http://127.0.0.1:8000/api/v1/agent/run \
 List sessions:
 
 ```bash
-curl http://127.0.0.1:8000/api/v1/sessions
+curl http://127.0.0.1:10304/api/v1/sessions
 ```
 
 List memory:
 
 ```bash
-curl http://127.0.0.1:8000/api/v1/memories
+curl http://127.0.0.1:10304/api/v1/memories
 ```
 
 ## Notes

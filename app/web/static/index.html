@@ -9,28 +9,41 @@
   <body>
     <div class="page-shell">
       <aside class="sidebar">
-        <div>
-          <p class="eyebrow">Local-first agent base</p>
+        <div class="sidebar-top">
           <h1>Airgent</h1>
           <p class="sidebar-copy">
-            CLI, API, and a small web surface on top of the same local session and memory store.
+            Developer:
+            <a href="https://github.com/Holidayrabbit" target="_blank" rel="noreferrer">Fulin Zhao</a>
+            <br />
+            Repository:
+            <a
+              href="https://github.com/Holidayrabbit/Airgent?tab=readme-ov-file"
+              target="_blank"
+              rel="noreferrer"
+            >
+              github.com/Holidayrabbit/Airgent
+            </a>
           </p>
         </div>
         <button id="new-chat-button" class="secondary-button" type="button">New Chat</button>
-        <section>
-          <div class="section-head">
-            <h2>Sessions</h2>
-            <button id="refresh-sessions-button" class="ghost-button" type="button">Refresh</button>
-          </div>
-          <div id="sessions-list" class="stack"></div>
-        </section>
-        <section>
-          <div class="section-head">
-            <h2>Memory</h2>
-            <button id="refresh-memory-button" class="ghost-button" type="button">Refresh</button>
-          </div>
-          <div id="memory-list" class="stack"></div>
-        </section>
+
+        <div class="sidebar-sections">
+          <section class="sidebar-section sidebar-section-grow">
+            <div class="section-head">
+              <h2>Sessions</h2>
+              <button id="refresh-sessions-button" class="ghost-button" type="button">Refresh</button>
+            </div>
+            <div id="sessions-list" class="session-list"></div>
+          </section>
+
+          <section class="sidebar-section memory-section">
+            <div class="section-head">
+              <h2>Memory</h2>
+              <button id="refresh-memory-button" class="ghost-button" type="button">Refresh</button>
+            </div>
+            <div id="memory-list" class="stack memory-list"></div>
+          </section>
+        </div>
       </aside>
 
       <main class="chat-pane">
@@ -41,7 +54,14 @@
           </div>
           <div id="session-badge" class="session-badge">No session yet</div>
         </div>
-        <div id="messages" class="messages"></div>
+
+        <section class="thread-panel">
+          <div class="thread-header">
+            <p class="eyebrow">Thread</p>
+          </div>
+          <div id="messages" class="messages"></div>
+        </section>
+
         <form id="composer" class="composer">
           <textarea
             id="message-input"
