@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from textwrap import dedent
 from typing import Any
 
 from app.agents.context import AgentRunContext
@@ -13,7 +14,7 @@ except ImportError:  # pragma: no cover
         context: AgentRunContext
 
 
-BASE_ROOT_INSTRUCTIONS = """
+ROOT_ASSISTANT_INSTRUCTIONS = """
 You are Airgent, a personal AI operating system for an individual user.
 
 Your responsibilities:
@@ -52,6 +53,15 @@ Behavior rules:
 """.strip()
 
 
+class _StaticRunContextWrapper:
+    def __init__(self, context: AgentRunContext) -> None:
+        self.context = context
+
+
+def _normalize_instructions(text: str) -> str:
+    return dedent(text).strip()
+
+
 def _render_memory_block(context: AgentRunContext) -> str:
     if not context.context_snapshot.memories:
         return "No relevant long-term memory was found for this request."
@@ -63,16 +73,48 @@ def _render_memory_block(context: AgentRunContext) -> str:
     return "\n".join(lines)
 
 
+def _render_runtime_block(context: AgentRunContext) -> str:
+    return "\n".join(
+        [
+            "Runtime context:",
+            f"- project_root: {context.settings.project_root}",
+            f"- skills_root: {context.settings.skills_root}",
+            f"- session_id: {context.session_id}",
+            _render_memory_block(context),
+        ]
+    )
+
+
+def compose_instructions(base_instructions: str, context: AgentRunContext) -> str:
+    return "\n\n".join(
+        [
+            _normalize_instructions(base_instructions),
+            _render_runtime_block(context),
+        ]
+    )
+
+
+def resolve_instructions(
+    context: AgentRunContext,
+    *,
+    instructions: str | None = None,
+    instructions_builder: str | None = None,
+) -> str:
+    if instructions is not None:
+        return compose_instructions(instructions, context)
+
+    if not instructions_builder:
+        raise ValueError("Agent config must define either instructions or instructions_builder.")
+
+    builder = globals().get(instructions_builder)
+    if not callable(builder):
+        raise AttributeError(f"Unknown instructions builder: {instructions_builder}")
+    return builder(_StaticRunContextWrapper(context), None)
+
+
 def build_root_instructions(
     wrapper: RunContextWrapper[AgentRunContext],
     _: Agent[Any] | None = None,
 ) -> str:
     context = wrapper.context
-    parts = [
-        BASE_ROOT_INSTRUCTIONS,
-        f"Current project_root: {context.settings.project_root}",
-        f"Current skills_root: {context.settings.skills_root}",
-        f"Current session_id: {context.session_id}",
-        _render_memory_block(context),
-    ]
-    return "\n\n".join(parts)
+    return compose_instructions(ROOT_ASSISTANT_INSTRUCTIONS, context)

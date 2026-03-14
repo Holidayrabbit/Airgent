@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from pydantic import BaseModel
+from pydantic import BaseModel, model_validator
 
 from app.agents import prompts
 from app.agents.context import AgentRunContext
@@ -24,9 +24,22 @@ class AgentConfig(BaseModel):
     version: str
     model: str
     max_turns: int
-    instructions_builder: str
+    instructions: str | None = None
+    instructions_builder: str | None = None
     allow_high_risk_tools: bool = False
     tools: list[str]
+
+    @model_validator(mode="after")
+    def validate_instructions(self) -> "AgentConfig":
+        instructions = self.instructions.strip() if self.instructions is not None else None
+        instructions_builder = (
+            self.instructions_builder.strip() if self.instructions_builder is not None else None
+        )
+        self.instructions = instructions or None
+        self.instructions_builder = instructions_builder or None
+        if bool(self.instructions) == bool(self.instructions_builder):
+            raise ValueError("Exactly one of 'instructions' or 'instructions_builder' must be set.")
+        return self
 
 
 class RuntimeSpec(BaseModel):
@@ -57,14 +70,18 @@ class AgentRegistry:
             raise RuntimeError("openai-agents is not installed.")
 
         config = self._load_config(context.agent_key)
-        instruction_builder = getattr(prompts, config.instructions_builder)
+        instructions = prompts.resolve_instructions(
+            context,
+            instructions=config.instructions,
+            instructions_builder=config.instructions_builder,
+        )
         tools = self.tool_registry.resolve_enabled(
             config.tools,
             allow_high_risk_tools=config.allow_high_risk_tools,
         )
         agent = Agent(
             name=config.key,
-            instructions=instruction_builder,
+            instructions=instructions,
             model=context.settings.default_model if config.model == "default" else config.model,
             model_settings=ModelSettings(temperature=0.2),
             tools=tools,

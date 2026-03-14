@@ -50,11 +50,11 @@ Conversation history, transcripts, and long-term memory are persisted locally in
 - [app/agents/registry.py](/Users/zq/work/MyProj/Airgent/app/agents/registry.py)
   Loads YAML agent config and builds the actual SDK `Agent`.
 - [app/agents/prompts.py](/Users/zq/work/MyProj/Airgent/app/agents/prompts.py)
-  Defines the root instructions and injects memory-derived context.
+  Composes final instructions from YAML prompt text and runtime context.
 - [app/agents/runner.py](/Users/zq/work/MyProj/Airgent/app/agents/runner.py)
   Main execution service around `Runner.run(...)`.
 - [app/agents/configs/root_assistant.yaml](/Users/zq/work/MyProj/Airgent/app/agents/configs/root_assistant.yaml)
-  Current root agent definition.
+  Current root agent definition with inline prompt text.
 
 ### 4. Persistence Layer
 
@@ -129,7 +129,7 @@ Local skills live in the active project under:
 - Single-process Python app
 - Shared runtime for CLI, API, and WebUI
 - Local SQLite instead of Redis or Langfuse
-- One root agent for V1, configured via YAML
+- Agent definitions live in YAML, including inline prompt text
 - Minimal tool surface: files + memory + skills
 - Proxy-friendly OpenAI client setup via `OPENAI_BASE_URL` and `chat_completions`
 
