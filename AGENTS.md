@@ -78,3 +78,13 @@
 - 优先通过文档定位，再进入代码。
 - 优先修改已有文档，不重复新增相同主题说明。
 - 如果新增模块或重要文档，更新本文件中的对应导航项。
+
+## Cursor Cloud specific instructions
+
+- **包管理器**: 项目使用 `uv`。依赖安装命令为 `uv sync`，运行命令前缀为 `uv run`。
+- **测试**: `uv run pytest` 即可运行全部测试（22 个），无需外部服务。
+- **启动开发服务器**: `uv run airgent serve --reload`，默认监听 `127.0.0.1:10304`。
+- **环境变量**: 需要 `OPENAI_API_KEY`（必须）和 `OPENAI_BASE_URL`（可选，代理地址）。项目会自动加载 `.env` 文件。
+- **无 lint 工具**: 项目当前未配置独立的 linter（无 ruff/flake8/mypy 配置），`pytest` 是唯一的自动化质量检查。
+- **数据库**: 嵌入式 SQLite，自动创建于 `~/.airgent/airgent.db`，无需额外配置。
+- **无 Docker/Node.js 依赖**: 单进程 Python 应用，无需 Docker 或前端构建步骤。
