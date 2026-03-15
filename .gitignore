@@ -8,5 +8,5 @@ __pycache__/
 .env
 .agents/
 .claude/
-AGENTS.md
+
 
