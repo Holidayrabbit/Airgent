@@ -137,6 +137,7 @@ OPENAI_API_MODE=chat_completions
 
 - Airgent now configures the Agents SDK with an explicit `AsyncOpenAI` client, so proxy `base_url` settings are applied consistently for both CLI and API.
 - `OPENAI_API_MODE` defaults to `chat_completions`, because proxy services are usually more compatible with that mode than `responses`.
+- When `OPENAI_BASE_URL` is set, namespaced model IDs such as `anthropic/claude-sonnet-4.5` are forwarded to the proxy as-is instead of being rejected as unknown providers.
 - SDK tracing is disabled by default because this project persists conversations locally instead of relying on hosted tracing.
 - Current root agent tools are:
   - `read_file`

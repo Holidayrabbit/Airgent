@@ -16,12 +16,15 @@ from app.memory.store import LocalStore
 from app.sessions.factory import SessionFactory
 
 try:
-    from agents import AgentUpdatedStreamEvent, RawResponsesStreamEvent, RunItemStreamEvent, Runner
+    from agents import AgentUpdatedStreamEvent, RawResponsesStreamEvent, RunConfig, RunItemStreamEvent, Runner
+    from agents.models.multi_provider import MultiProvider
 except ImportError:  # pragma: no cover
     AgentUpdatedStreamEvent = None  # type: ignore[assignment]
     RawResponsesStreamEvent = None  # type: ignore[assignment]
+    RunConfig = None  # type: ignore[assignment]
     RunItemStreamEvent = None  # type: ignore[assignment]
     Runner = None  # type: ignore[assignment]
+    MultiProvider = None  # type: ignore[assignment]
 
 
 @dataclass(frozen=True)
@@ -71,6 +74,7 @@ class AgentRunnerService:
                 starting_agent=agent,
                 input=request.input,
                 context=context,
+                run_config=self._build_sdk_run_config(),
                 session=session,
                 max_turns=request.max_turns or runtime_spec.max_turns,
             )
@@ -129,6 +133,7 @@ class AgentRunnerService:
                 starting_agent=agent,
                 input=request.input,
                 context=context,
+                run_config=self._build_sdk_run_config(),
                 session=session,
                 max_turns=request.max_turns or runtime_spec.max_turns,
             )
@@ -185,6 +190,18 @@ class AgentRunnerService:
         )
         agent, runtime_spec = self.agent_registry.build(context)
         return session, context, runtime_spec, agent
+
+    def _build_sdk_run_config(self) -> Any | None:
+        if RunConfig is None or MultiProvider is None:
+            return None
+        if not self.settings.openai_base_url:
+            return None
+        return RunConfig(
+            model_provider=MultiProvider(
+                openai_prefix_mode="model_id",
+                unknown_prefix_mode="model_id",
+            )
+        )
 
     def _normalize_error(self, exc: Exception) -> AppError:
         reason = str(exc).strip()

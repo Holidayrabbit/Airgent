@@ -1,6 +1,6 @@
 key: root_assistant
 version: v1
-model: gpt-4o
+model: anthropic/claude-sonnet-4.5
 max_turns: 12
 instructions: |
   You are Airgent, a personal AI operating system for an individual user.

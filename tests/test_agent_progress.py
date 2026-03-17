@@ -90,6 +90,36 @@ def test_tool_output_summary_uses_file_status(monkeypatch) -> None:
     assert event.detail == "status: edited\npath: app/tui.py"
 
 
+def test_sdk_run_config_passthroughs_prefixed_model_names_for_proxy(monkeypatch) -> None:
+    service = _runner_service()
+    service.settings = SimpleNamespace(openai_base_url="https://proxy.example.com/v1")
+
+    class FakeMultiProvider:
+        def __init__(self, **kwargs) -> None:
+            self.kwargs = kwargs
+
+    class FakeRunConfig:
+        def __init__(self, **kwargs) -> None:
+            self.kwargs = kwargs
+
+    monkeypatch.setattr(runner_module, "MultiProvider", FakeMultiProvider)
+    monkeypatch.setattr(runner_module, "RunConfig", FakeRunConfig)
+
+    run_config = service._build_sdk_run_config()
+
+    assert run_config is not None
+    provider = run_config.kwargs["model_provider"]
+    assert provider.kwargs["openai_prefix_mode"] == "model_id"
+    assert provider.kwargs["unknown_prefix_mode"] == "model_id"
+
+
+def test_sdk_run_config_uses_sdk_defaults_without_proxy_base_url() -> None:
+    service = _runner_service()
+    service.settings = SimpleNamespace(openai_base_url=None)
+
+    assert service._build_sdk_run_config() is None
+
+
 def test_chat_renders_execution_in_main_thread(tmp_path) -> None:
     tui = AirgentTUI(services=_fake_services(tmp_path), agent_key="root_assistant", max_turns=8)
     tui.state.messages = [("user", "查看你工作目录的readme")]
