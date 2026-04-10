@@ -17,8 +17,10 @@ app = typer.Typer(
 )
 sessions_app = typer.Typer(help="Inspect or delete saved sessions.")
 memory_app = typer.Typer(help="Inspect or manage long-term memory.")
+cron_app = typer.Typer(help="Manage scheduled cron jobs.")
 app.add_typer(sessions_app, name="sessions")
 app.add_typer(memory_app, name="memory")
+app.add_typer(cron_app, name="cron")
 
 
 async def _run_once(message: str, *, session_id: str | None, agent_key: str, max_turns: int | None) -> None:
@@ -182,6 +184,103 @@ def add_memory(
         source_session_id=source_session_id,
     )
     typer.echo(f"Saved memory {record.id}")
+
+
+# ------------------------------------------------------------------
+# Cron commands
+# ------------------------------------------------------------------
+@cron_app.command("list")
+def cron_list() -> None:
+    """List all scheduled jobs."""
+
+    services = build_services()
+    jobs = services.cron.list_jobs()
+    if not jobs:
+        typer.echo("No scheduled jobs.")
+        return
+    for j in jobs:
+        status = "enabled" if j.enabled else "paused"
+        next_run = j.next_run_at or "—"
+        typer.echo(f"{j.id}  [{status}] {j.name}  agent={j.agent_key}  schedule={j.schedule_kind.value}:{j.schedule_value}  next={next_run}")
+
+
+@cron_app.command("create")
+def cron_create(
+    name: str,
+    input: str = typer.Option(..., prompt=True, help="Prompt input sent to the agent"),
+    agent_key: str = typer.Option("root_assistant", help="Agent config key."),
+    schedule_kind: str = typer.Option("cron", help="Schedule type: cron, once, interval."),
+    schedule_value: str = typer.Option(..., prompt=True, help="Cron expr (e.g. '0 * * * *'), 'once', or interval seconds."),
+    enabled: bool = typer.Option(True, help="Start enabled immediately."),
+) -> None:
+    """Create a new scheduled job."""
+
+    from app.cron.service import JobRecord, ScheduleKind as SK
+    kind = SK(schedule_kind)
+    services = build_services()
+    record = JobRecord(
+        name=name,
+        agent_key=agent_key,
+        input=input,
+        schedule_kind=kind,
+        schedule_value=schedule_value,
+        enabled=enabled,
+        one_shot=(schedule_kind == "once"),
+    )
+    job = services.cron.create_job(record)
+    typer.echo(f"Created job {job.id}: {job.name}  next_run={job.next_run_at}")
+
+
+@cron_app.command("delete")
+def cron_delete(job_id: str) -> None:
+    """Delete a scheduled job."""
+
+    services = build_services()
+    deleted = services.cron.delete_job(job_id)
+    if deleted:
+        typer.echo(f"Deleted {job_id}")
+    else:
+        typer.echo(f"Job {job_id} not found", err=True)
+        raise typer.Exit(code=1)
+
+
+@cron_app.command("pause")
+def cron_pause(job_id: str) -> None:
+    """Pause a scheduled job."""
+
+    services = build_services()
+    ok = services.cron.pause_job(job_id)
+    if ok:
+        typer.echo(f"Paused {job_id}")
+    else:
+        typer.echo(f"Job {job_id} not found", err=True)
+        raise typer.Exit(code=1)
+
+
+@cron_app.command("resume")
+def cron_resume(job_id: str) -> None:
+    """Resume a paused job."""
+
+    services = build_services()
+    ok = services.cron.resume_job(job_id)
+    if ok:
+        typer.echo(f"Resumed {job_id}")
+    else:
+        typer.echo(f"Job {job_id} not found", err=True)
+        raise typer.Exit(code=1)
+
+
+@cron_app.command("trigger")
+def cron_trigger(job_id: str) -> None:
+    """Immediately fire a job (skipping its schedule)."""
+
+    services = build_services()
+    job = services.cron.get_job(job_id)
+    if job is None:
+        typer.echo(f"Job {job_id} not found", err=True)
+        raise typer.Exit(code=1)
+    services.cron.trigger_job(job_id)
+    typer.echo(f"Triggered {job_id} ({job.name}) — running in background.")
 
 
 def main() -> None:

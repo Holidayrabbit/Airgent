@@ -6,6 +6,7 @@ from app.agents.registry import AgentRegistry
 from app.agents.runner import AgentRunnerService
 from app.core.config import Settings, get_settings
 from app.core.openai_config import configure_openai_sdk
+from app.cron.service import CronService
 from app.memory.context_builder import ContextBuilder
 from app.memory.store import LocalStore
 from app.sessions.factory import SessionFactory
@@ -21,12 +22,14 @@ class AppServices:
     tool_registry: ToolRegistry
     agent_registry: AgentRegistry
     runner: AgentRunnerService
+    cron: CronService
 
 
 def build_services(settings: Settings | None = None) -> AppServices:
     resolved_settings = settings or get_settings()
     configure_openai_sdk(resolved_settings)
     store = LocalStore(resolved_settings.db_path)
+    store.initialize_cron()
     context_builder = ContextBuilder(
         store=store,
         transcript_limit=resolved_settings.transcript_context_limit,
@@ -45,6 +48,7 @@ def build_services(settings: Settings | None = None) -> AppServices:
         session_factory=session_factory,
         agent_registry=agent_registry,
     )
+    cron = CronService(store=store, runner=runner)
     return AppServices(
         settings=resolved_settings,
         store=store,
@@ -53,4 +57,5 @@ def build_services(settings: Settings | None = None) -> AppServices:
         tool_registry=tool_registry,
         agent_registry=agent_registry,
         runner=runner,
+        cron=cron,
     )

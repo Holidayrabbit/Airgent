@@ -119,6 +119,24 @@ class LocalStore:
 
                 CREATE INDEX IF NOT EXISTS idx_memories_created_at
                 ON memories(created_at DESC);
+
+                CREATE TABLE IF NOT EXISTS scheduled_jobs (
+                    id TEXT PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    agent_key TEXT NOT NULL,
+                    input TEXT NOT NULL,
+                    schedule_kind TEXT NOT NULL,
+                    schedule_value TEXT NOT NULL,
+                    enabled INTEGER NOT NULL DEFAULT 1,
+                    one_shot INTEGER NOT NULL DEFAULT 0,
+                    last_run_at TEXT,
+                    next_run_at TEXT,
+                    created_at TEXT NOT NULL,
+                    metadata_json TEXT NOT NULL DEFAULT '{}'
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_scheduled_jobs_next_run
+                ON scheduled_jobs(next_run_at) WHERE enabled = 1;
                 """
             )
 
@@ -385,3 +403,106 @@ class LocalStore:
         ranked = [record for record in memories if score(record)[0] > 0]
         ranked.sort(key=score, reverse=True)
         return ranked[:limit]
+
+    # ------------------------------------------------------------------
+    # Scheduled Jobs (Cron)
+    # ------------------------------------------------------------------
+    def initialize_cron(self) -> None:
+        """Idempotent — called every startup to ensure table exists."""
+        with self._connect() as connection:
+            connection.executescript(
+                """
+                CREATE TABLE IF NOT EXISTS scheduled_jobs (
+                    id TEXT PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    agent_key TEXT NOT NULL,
+                    input TEXT NOT NULL,
+                    schedule_kind TEXT NOT NULL,
+                    schedule_value TEXT NOT NULL,
+                    enabled INTEGER NOT NULL DEFAULT 1,
+                    one_shot INTEGER NOT NULL DEFAULT 0,
+                    last_run_at TEXT,
+                    next_run_at TEXT,
+                    created_at TEXT NOT NULL,
+                    metadata_json TEXT NOT NULL DEFAULT '{}'
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_scheduled_jobs_next_run
+                ON scheduled_jobs(next_run_at) WHERE enabled = 1;
+                """
+            )
+
+    def insert_cron_job(
+        self,
+        *,
+        id: str,
+        name: str,
+        agent_key: str,
+        input: str,
+        schedule_kind: str,
+        schedule_value: str,
+        enabled: bool,
+        one_shot: bool,
+        last_run_at: str | None,
+        next_run_at: str | None,
+        created_at: str,
+        metadata_json: str,
+    ) -> None:
+        with self._connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO scheduled_jobs(
+                    id, name, agent_key, input, schedule_kind, schedule_value,
+                    enabled, one_shot, last_run_at, next_run_at, created_at, metadata_json
+                ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    id, name, agent_key, input, schedule_kind, schedule_value,
+                    int(enabled), int(one_shot), last_run_at, next_run_at, created_at, metadata_json,
+                ),
+            )
+
+    def get_cron_job(self, job_id: str) -> dict[str, Any] | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM scheduled_jobs WHERE id = ?", (job_id,)
+            ).fetchone()
+        return dict(row) if row else None
+
+    def list_cron_jobs(self) -> list[dict[str, Any]]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT * FROM scheduled_jobs ORDER BY created_at DESC"
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def list_due_cron_jobs(self, now_iso: str) -> list[dict[str, Any]]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT * FROM scheduled_jobs
+                WHERE enabled = 1 AND next_run_at IS NOT NULL AND next_run_at <= ?
+                """,
+                (now_iso,),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def update_cron_job(self, job_id: str, fields: dict[str, Any]) -> dict[str, Any] | None:
+        setters = ", ".join(f"{k} = ?" for k in fields)
+        values = list(fields.values()) + [job_id]
+        with self._connect() as connection:
+            connection.execute(
+                f"UPDATE scheduled_jobs SET {setters} WHERE id = ?",
+                values,
+            )
+            row = connection.execute(
+                "SELECT * FROM scheduled_jobs WHERE id = ?", (job_id,)
+            ).fetchone()
+        return dict(row) if row else None
+
+    def delete_cron_job(self, job_id: str) -> bool:
+        with self._connect() as connection:
+            cursor = connection.execute(
+                "DELETE FROM scheduled_jobs WHERE id = ?", (job_id,)
+            )
+        return cursor.rowcount > 0
