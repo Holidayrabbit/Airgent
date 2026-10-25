@@ -6,8 +6,6 @@ readme = "README.md"
 requires-python = ">=3.11,<3.14"
 dependencies = [
     "fastapi>=0.115.0",
-    "openai>=1.109.0",
-    "openai-agents>=0.2.0",
     "pydantic>=2.10.0",
     "pydantic-settings>=2.7.0",
     "prompt-toolkit>=3.0.52",

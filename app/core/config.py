@@ -13,6 +13,7 @@ class Settings(BaseSettings):
         env_file_encoding="utf-8",
         extra="ignore",
         case_sensitive=False,
+        populate_by_name=True,
     )
 
     app_name: str = "Airgent"
@@ -31,7 +32,13 @@ class Settings(BaseSettings):
     )
 
     default_agent_key: str = "root_assistant"
-    default_model: str = "gpt-4o"
+    # Either "provider/model-id" for a custom proxy model (e.g. "anthropic/claude-sonnet-4.5"
+    # routed through OPENAI_BASE_URL) or any model id resolvable by the pi kernel
+    # (e.g. "gpt-4o", "anthropic/claude-sonnet-4.5" with provider env keys).
+    default_model: str = Field(
+        default="anthropic/claude-sonnet-4.5",
+        validation_alias=AliasChoices("AIRGENT_MODEL", "AIRGENT_DEFAULT_MODEL"),
+    )
     default_max_turns: int = 12
 
     project_root: Path = Field(default_factory=Path.cwd)
@@ -42,13 +49,27 @@ class Settings(BaseSettings):
     transcript_context_limit: int = 6
     memory_search_limit: int = 5
     session_list_limit: int = 50
-    openai_agents_disable_tracing: bool = True
+
+    # pi kernel
+    pi_bin: str = Field(default="pi", validation_alias=AliasChoices("AIRGENT_PI_BIN", "PI_BIN"))
+    pi_agent_dir: Path = Field(default=Path.home() / ".airgent" / "pi" / "agent")
+    pi_session_dir: Path = Field(default=Path.home() / ".airgent" / "pi" / "sessions")
+    pi_idle_grace_seconds: float = 0.4
+    pi_request_timeout_seconds: float = 30.0
+    pi_process_idle_timeout_seconds: float = 900.0
 
     def ensure_directories(self) -> None:
         self.project_root.mkdir(parents=True, exist_ok=True)
         self.data_dir.mkdir(parents=True, exist_ok=True)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self.skills_root.mkdir(parents=True, exist_ok=True)
+
+    @property
+    def pi_api_name(self) -> str:
+        """Map the legacy OpenAI API mode onto a pi model api identifier."""
+        if self.openai_api_mode.lower().startswith("responses"):
+            return "openai-responses"
+        return "openai-completions"
 
 
 @lru_cache(maxsize=1)
@@ -60,5 +81,7 @@ def get_settings() -> Settings:
     settings.skills_root = (
         (settings.skills_root or settings.project_root / ".agents" / "skills").expanduser().resolve()
     )
+    settings.pi_agent_dir = settings.pi_agent_dir.expanduser().resolve()
+    settings.pi_session_dir = settings.pi_session_dir.expanduser().resolve()
     settings.ensure_directories()
     return settings

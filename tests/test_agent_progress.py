@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-import app.agents.runner as runner_module
 from app.agents.runner import AgentRunnerService
+from app.kernel.events import PiEvent
 from app.tui import AirgentTUI, ExecutionEntry
 from prompt_toolkit.mouse_events import MouseButton, MouseEvent, MouseEventType
 
@@ -26,98 +26,46 @@ def _render_text(fragments) -> str:
     return "".join(text for _, text in fragments)
 
 
-def test_raw_response_deltas_are_hidden(monkeypatch) -> None:
+
+
+
+
+
+
+def test_pi_tool_event_translates_to_readable_summary() -> None:
     service = _runner_service()
 
-    class FakeRawResponsesStreamEvent:
-        def __init__(self, data) -> None:
-            self.data = data
-
-    monkeypatch.setattr(runner_module, "RawResponsesStreamEvent", FakeRawResponsesStreamEvent)
-
-    event = service._serialize_progress_event(
-        FakeRawResponsesStreamEvent(
-            SimpleNamespace(type="response.function_call_arguments.delta", delta='{"path":"README.md"}')
-        )
+    event = service._translate(
+        PiEvent("tool_start", {"name": "read", "arguments": {"path": "README.md"}}),
+        session_id="s1",
     )
 
-    assert event is None
-
-
-def test_tool_call_summary_uses_human_readable_action(monkeypatch) -> None:
-    service = _runner_service()
-
-    class FakeRunItemStreamEvent:
-        def __init__(self, name, item) -> None:
-            self.name = name
-            self.item = item
-
-    monkeypatch.setattr(runner_module, "RunItemStreamEvent", FakeRunItemStreamEvent)
-
-    event = service._serialize_progress_event(
-        FakeRunItemStreamEvent(
-            "tool_called",
-            SimpleNamespace(raw_item={"name": "read_file", "arguments": '{"path":"README.md"}'}),
-        )
-    )
-
-    assert event is not None
     assert event.kind == "tool"
     assert event.summary == "Reading README.md"
-    assert event.detail == "tool: read_file\npath: README.md"
+    assert event.detail == "tool: read\npath: README.md"
 
 
-def test_tool_output_summary_uses_file_status(monkeypatch) -> None:
+def test_pi_tool_end_reports_failure() -> None:
     service = _runner_service()
 
-    class FakeRunItemStreamEvent:
-        def __init__(self, name, item) -> None:
-            self.name = name
-            self.item = item
-
-    monkeypatch.setattr(runner_module, "RunItemStreamEvent", FakeRunItemStreamEvent)
-
-    event = service._serialize_progress_event(
-        FakeRunItemStreamEvent(
-            "tool_output",
-            SimpleNamespace(raw_item={"output": '{"status":"edited","path":"app/tui.py"}'}),
-        )
+    event = service._translate(
+        PiEvent("tool_end", {"name": "bash", "is_error": True, "text": "boom"}), session_id="s1"
     )
 
-    assert event is not None
     assert event.kind == "tool_output"
-    assert event.summary == "Updated app/tui.py"
-    assert event.detail == "status: edited\npath: app/tui.py"
+    assert event.summary == "Tool step failed"
 
 
-def test_sdk_run_config_passthroughs_prefixed_model_names_for_proxy(monkeypatch) -> None:
+def test_pi_memory_tools_keep_native_summaries() -> None:
     service = _runner_service()
-    service.settings = SimpleNamespace(openai_base_url="https://proxy.example.com/v1")
 
-    class FakeMultiProvider:
-        def __init__(self, **kwargs) -> None:
-            self.kwargs = kwargs
+    search = service._translate(
+        PiEvent("tool_start", {"name": "search_memory", "arguments": {"query": "uv"}}), session_id="s1"
+    )
+    remember = service._translate(PiEvent("tool_start", {"name": "remember_note", "arguments": {}}), session_id="s1")
 
-    class FakeRunConfig:
-        def __init__(self, **kwargs) -> None:
-            self.kwargs = kwargs
-
-    monkeypatch.setattr(runner_module, "MultiProvider", FakeMultiProvider)
-    monkeypatch.setattr(runner_module, "RunConfig", FakeRunConfig)
-
-    run_config = service._build_sdk_run_config()
-
-    assert run_config is not None
-    provider = run_config.kwargs["model_provider"]
-    assert provider.kwargs["openai_prefix_mode"] == "model_id"
-    assert provider.kwargs["unknown_prefix_mode"] == "model_id"
-
-
-def test_sdk_run_config_uses_sdk_defaults_without_proxy_base_url() -> None:
-    service = _runner_service()
-    service.settings = SimpleNamespace(openai_base_url=None)
-
-    assert service._build_sdk_run_config() is None
+    assert search.summary == "Searching memory for 'uv'"
+    assert remember.summary == "Saving a memory"
 
 
 def test_chat_renders_execution_in_main_thread(tmp_path) -> None:

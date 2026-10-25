@@ -14,16 +14,14 @@ router = APIRouter(prefix="/agent", tags=["agent"])
 
 @router.get("/available", response_model=list[AgentOptionResponse])
 async def list_agents(request: Request) -> list[AgentOptionResponse]:
-    default_agent_key = request.app.state.services.settings.default_agent_key
-    configs = request.app.state.services.agent_registry.list_configs()
+    settings = request.app.state.services.settings
     return [
         AgentOptionResponse(
-            key=config.key,
-            model=config.model,
-            version=config.version,
-            is_default=config.key == default_agent_key,
+            key=settings.default_agent_key,
+            model=settings.default_model,
+            version="pi-kernel",
+            is_default=True,
         )
-        for config in configs
     ]
 
 

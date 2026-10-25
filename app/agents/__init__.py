@@ -1,1 +1,1 @@
-"""Agent registry and runtime services."""
+"""Agent runner services (executed on the pi kernel)."""

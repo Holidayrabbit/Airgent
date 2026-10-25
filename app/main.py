@@ -28,6 +28,7 @@ async def lifespan(app: FastAPI):
     await app.state.services.cron.start()
     yield
     await app.state.services.cron.stop()
+    await app.state.services.kernel.shutdown()
 
 
 def create_app() -> FastAPI:

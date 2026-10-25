@@ -137,7 +137,44 @@ class LocalStore:
 
                 CREATE INDEX IF NOT EXISTS idx_scheduled_jobs_next_run
                 ON scheduled_jobs(next_run_at) WHERE enabled = 1;
+
+                CREATE TABLE IF NOT EXISTS kernel_sessions (
+                    airgent_session_id TEXT PRIMARY KEY,
+                    pi_session_file TEXT NOT NULL,
+                    model TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
                 """
+            )
+
+    def get_kernel_session(self, session_id: str) -> dict[str, str] | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT pi_session_file, model FROM kernel_sessions WHERE airgent_session_id = ?",
+                (session_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        return {"pi_session_file": row["pi_session_file"], "model": row["model"]}
+
+    def set_kernel_session(self, session_id: str, *, pi_session_file: str, model: str) -> None:
+        with self._connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO kernel_sessions (airgent_session_id, pi_session_file, model, updated_at)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(airgent_session_id) DO UPDATE SET
+                    pi_session_file = excluded.pi_session_file,
+                    model = excluded.model,
+                    updated_at = excluded.updated_at
+                """,
+                (session_id, pi_session_file, model, utcnow()),
+            )
+
+    def delete_kernel_session(self, session_id: str) -> None:
+        with self._connect() as connection:
+            connection.execute(
+                "DELETE FROM kernel_sessions WHERE airgent_session_id = ?", (session_id,)
             )
 
     def upsert_session(self, session_id: str, agent_key: str, *, title: str | None = None) -> None:
@@ -337,6 +374,7 @@ class LocalStore:
             connection.execute("DELETE FROM session_items WHERE session_id = ?", (session_id,))
             connection.execute("DELETE FROM transcripts WHERE session_id = ?", (session_id,))
             connection.execute("DELETE FROM sessions WHERE session_id = ?", (session_id,))
+            connection.execute("DELETE FROM kernel_sessions WHERE airgent_session_id = ?", (session_id,))
 
     def add_memory(
         self,

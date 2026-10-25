@@ -1,142 +1,29 @@
-# Airgent Architecture
+# Architecture
 
-## Overview
+Airgent is a local-first personal agent runtime. One runtime is exposed through a CLI, a TUI, an HTTP API, and a WebUI.
 
-Airgent is a local-first personal agent runtime.
+## Kernel
 
-It exposes one shared backend through three entry points:
+The agent brain is [pi](https://pi.dev) (`@earendil-works/pi-coding-agent`), a minimal MIT-licensed agent harness. Airgent spawns one `pi --mode rpc` subprocess per session and speaks its JSONL protocol over stdin/stdout (`app/kernel/`):
 
-- CLI: `airgent chat`, `airgent tui`, `airgent sessions`, `airgent memory`
-- API: FastAPI routes under `/api/v1/*`
-- WebUI: static frontend served by the FastAPI app
+- `process.py` — subprocess lifecycle, request/response correlation by id, event queue
+- `events.py` — normalizes pi records (text deltas, tool calls, tool results, errors) into typed events
+- `manager.py` — per-session process pool, prompt runs, idle detection, session resume
+- `setup.py` — materializes the isolated pi agent dir under `~/.airgent/pi/agent` (models.json, APPEND_SYSTEM.md, memory extension)
 
-The runtime layer is built on top of the OpenAI Agents SDK.  
-Conversation history, transcripts, and long-term memory are persisted locally in SQLite instead of being sent to a hosted tracing system.
+pi owns what it is best at: model routing (15+ providers, OpenAI-compatible proxies), file/shell tools, `.agents/skills` discovery, MCP, conversation compaction, and session trees. The user's own `~/.pi` directory is never touched.
 
-## High-Level Flow
+## Airgent layers
 
-1. User sends input from CLI, TUI, API, or WebUI.
-2. The entry point calls the shared service container in [app/bootstrap.py](/Users/zq/work/MyProj/Airgent/app/bootstrap.py).
-3. `AgentRunnerService` builds:
-   - a local session adapter
-   - a context snapshot from recent transcript + memory hits
-   - the configured root agent and its tools
-4. The OpenAI Agents SDK runs the agent.
-5. Final output is persisted back to the local transcript store.
-6. The caller receives the response and can later inspect sessions or memory.
+- `app/agents/runner.py` — `AgentRunnerService`: translates kernel events into progress events consumed by the TUI/API, persists transcripts, injects relevant long-term memory into prompts
+- `app/memory/` — SQLite store for transcripts and long-term memory; the `airgent-memory` pi extension exposes `search_memory`/`remember_note` tools backed by the same database
+- `app/api/` — FastAPI routes (agent run/stream, sessions, memory, health) + static WebUI
+- `app/cli.py` / `app/tui.py` — CLI commands and the full-screen terminal UI
 
-## Main Modules
+## Sessions
 
-### 1. Entry Layer
+Each Airgent session maps to one pi session file under `~/.airgent/pi/sessions` (binding stored in SQLite, table `kernel_sessions`). Later runs resume the same pi conversation, preserving tool history and compaction. Airgent additionally mirrors user/assistant transcripts into its own database for listing and search.
 
-- [app/cli.py](/Users/zq/work/MyProj/Airgent/app/cli.py)
-  Provides normal CLI commands and the full-screen TUI entry.
-- [app/main.py](/Users/zq/work/MyProj/Airgent/app/main.py)
-  Creates the FastAPI application, mounts routes, and serves static assets.
-- [app/tui.py](/Users/zq/work/MyProj/Airgent/app/tui.py)
-  Prompt-toolkit based terminal UI with transcript, recent sessions, composer, and `/` command panel.
+## Model configuration
 
-### 2. Runtime Assembly
-
-- [app/bootstrap.py](/Users/zq/work/MyProj/Airgent/app/bootstrap.py)
-  Central place that wires settings, OpenAI client config, store, session factory, tool registry, and runner.
-- [app/core/config.py](/Users/zq/work/MyProj/Airgent/app/core/config.py)
-  Loads runtime configuration from environment and `.env`, including project root and project-local skills path.
-- [app/core/openai_config.py](/Users/zq/work/MyProj/Airgent/app/core/openai_config.py)
-  Configures the OpenAI Agents SDK with explicit `AsyncOpenAI` client settings.
-
-### 3. Agent Layer
-
-- [app/agents/registry.py](/Users/zq/work/MyProj/Airgent/app/agents/registry.py)
-  Loads YAML agent config and builds the actual SDK `Agent`.
-- [app/agents/prompts.py](/Users/zq/work/MyProj/Airgent/app/agents/prompts.py)
-  Composes final instructions from YAML prompt text and runtime context.
-- [app/agents/runner.py](/Users/zq/work/MyProj/Airgent/app/agents/runner.py)
-  Main execution service around `Runner.run(...)`.
-- [app/agents/configs/root_assistant.yaml](/Users/zq/work/MyProj/Airgent/app/agents/configs/root_assistant.yaml)
-  Current root agent definition with inline prompt text.
-
-### 4. Persistence Layer
-
-- [app/memory/store.py](/Users/zq/work/MyProj/Airgent/app/memory/store.py)
-  SQLite-backed storage for:
-  - `sessions`
-  - `session_items`
-  - `transcripts`
-  - `memories`
-- [app/memory/context_builder.py](/Users/zq/work/MyProj/Airgent/app/memory/context_builder.py)
-  Builds a lightweight context snapshot from recent messages and memory search results.
-- [app/sessions/session.py](/Users/zq/work/MyProj/Airgent/app/sessions/session.py)
-  Implements the session interface expected by the OpenAI Agents SDK.
-- [app/sessions/factory.py](/Users/zq/work/MyProj/Airgent/app/sessions/factory.py)
-  Creates local conversation sessions and session IDs.
-
-### 5. Tool Layer
-
-- [app/tools/memory_tools.py](/Users/zq/work/MyProj/Airgent/app/tools/memory_tools.py)
-  Exposes `search_memory` and `remember_note`.
-- [app/tools/file_tools.py](/Users/zq/work/MyProj/Airgent/app/tools/file_tools.py)
-  Exposes `read_file`, `create_file`, and `edit_file`, restricted to the current project root.
-- [app/tools/skill_tools.py](/Users/zq/work/MyProj/Airgent/app/tools/skill_tools.py)
-  Exposes local skill discovery and loading.
-- [app/tools/registry.py](/Users/zq/work/MyProj/Airgent/app/tools/registry.py)
-  Registers all tools available to the root agent.
-
-### 6. API Layer
-
-- [app/api/routes/agent.py](/Users/zq/work/MyProj/Airgent/app/api/routes/agent.py)
-  Agent run endpoint.
-- [app/api/routes/session.py](/Users/zq/work/MyProj/Airgent/app/api/routes/session.py)
-  Session listing, detail, deletion.
-- [app/api/routes/memory.py](/Users/zq/work/MyProj/Airgent/app/api/routes/memory.py)
-  Memory listing, creation, search.
-- [app/api/routes/health.py](/Users/zq/work/MyProj/Airgent/app/api/routes/health.py)
-  Health check.
-
-### 7. Frontend Layer
-
-- [app/web/static/index.html](/Users/zq/work/MyProj/Airgent/app/web/static/index.html)
-- [app/web/static/app.js](/Users/zq/work/MyProj/Airgent/app/web/static/app.js)
-- [app/web/static/style.css](/Users/zq/work/MyProj/Airgent/app/web/static/style.css)
-
-The WebUI is intentionally simple: it calls the same API layer used by external clients and does not have a separate frontend build system yet.
-
-## Data Model
-
-Airgent currently stores everything in one local SQLite database, defaulting to:
-
-```text
-~/.airgent/airgent.db
-```
-
-Logical data groups:
-
-- Session metadata: chat list and update timestamps
-- Session items: SDK-compatible short-term conversation state
-- Transcript messages: user / assistant readable history
-- Memories: durable user facts, preferences, and project notes
-
-## Skills
-
-Local skills live in the active project under:
-
-```text
-.agents/skills
-```
-
-## Current Design Choices
-
-- Single-process Python app
-- Shared runtime for CLI, API, and WebUI
-- Local SQLite instead of Redis or Langfuse
-- Agent definitions live in YAML, including inline prompt text
-- Minimal tool surface: files + memory + skills
-- Proxy-friendly OpenAI client setup via `OPENAI_BASE_URL` and `chat_completions`
-
-## Current Limitations
-
-- No streaming response path yet
-- No multi-agent handoff graph yet
-- Memory retrieval is simple keyword matching, not embeddings
-- TUI is intentionally compact and not yet feature-complete
-- WebUI is static and minimal, without a frontend build pipeline
+With `OPENAI_BASE_URL` set, Airgent writes a custom `airgent` provider into the isolated `models.json` (`openai-completions` or `openai-responses` per `OPENAI_API_MODE`) and forwards namespaced model ids such as `anthropic/claude-sonnet-4.5` through the proxy unchanged. Without a proxy, pi resolves models from its built-in catalog using provider API keys from the environment.

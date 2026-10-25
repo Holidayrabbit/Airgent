@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from typing import Annotated
 
 import typer
@@ -25,17 +26,20 @@ app.add_typer(cron_app, name="cron")
 
 async def _run_once(message: str, *, session_id: str | None, agent_key: str, max_turns: int | None) -> None:
     services = build_services()
-    result = await services.runner.run(
-        AgentRunRequest(
-            input=message,
-            session_id=session_id,
-            agent_key=agent_key,
-            max_turns=max_turns,
-        ),
-        request_id="cli",
-    )
-    typer.echo(f"[session {result.session_id}]")
-    typer.echo(result.output)
+    try:
+        result = await services.runner.run(
+            AgentRunRequest(
+                input=message,
+                session_id=session_id,
+                agent_key=agent_key,
+                max_turns=max_turns,
+            ),
+            request_id="cli",
+        )
+        typer.echo(f"[session {result.session_id}]")
+        typer.echo(result.output)
+    finally:
+        await services.kernel.shutdown()
 
 
 @app.command()
@@ -70,29 +74,32 @@ def chat(
     services = build_services()
     active_session_id = session_id
     typer.echo("Interactive mode. Use /exit to quit, /new to start a new session.")
-    while True:
-        prompt = typer.prompt("You", prompt_suffix=" > ").strip()
-        if not prompt:
-            continue
-        if prompt in {"/exit", "/quit"}:
-            break
-        if prompt == "/new":
-            active_session_id = None
-            typer.echo("Started a new session.")
-            continue
-        result = asyncio.run(
-            services.runner.run(
-                AgentRunRequest(
-                    input=prompt,
-                    session_id=active_session_id,
-                    agent_key=agent_key,
-                    max_turns=max_turns,
-                ),
-                request_id="cli",
+    try:
+        while True:
+            prompt = typer.prompt("You", prompt_suffix=" > ").strip()
+            if not prompt:
+                continue
+            if prompt in {"/exit", "/quit"}:
+                break
+            if prompt == "/new":
+                active_session_id = None
+                typer.echo("Started a new session.")
+                continue
+            result = asyncio.run(
+                services.runner.run(
+                    AgentRunRequest(
+                        input=prompt,
+                        session_id=active_session_id,
+                        agent_key=agent_key,
+                        max_turns=max_turns,
+                    ),
+                    request_id="cli",
+                )
             )
-        )
-        active_session_id = result.session_id
-        typer.echo(f"Airgent [{active_session_id}] > {result.output}")
+            active_session_id = result.session_id
+            typer.echo(f"Airgent [{active_session_id}] > {result.output}")
+    finally:
+        asyncio.run(services.kernel.shutdown())
 
 
 @app.command()
@@ -156,11 +163,31 @@ def list_memory(limit: int = typer.Option(20, min=1, max=100)) -> None:
 
 
 @memory_app.command("search")
-def search_memory(query: str, limit: int = typer.Option(10, min=1, max=50)) -> None:
+def search_memory(
+    query: str,
+    limit: int = typer.Option(10, min=1, max=50),
+    format: str = typer.Option("text", "--format", help="Output format: text or json."),
+) -> None:
     """Search saved memory."""
 
     services = build_services()
     records = services.store.search_memories(query, limit=limit)
+    if format == "json":
+        typer.echo(
+            json.dumps(
+                [
+                    {
+                        "id": record.id,
+                        "content": record.content,
+                        "tags": record.tags,
+                        "created_at": record.created_at,
+                    }
+                    for record in records
+                ],
+                ensure_ascii=False,
+            )
+        )
+        return
     if not records:
         typer.echo("No matching memory.")
         return
@@ -174,6 +201,7 @@ def add_memory(
     content: str,
     tags: str = typer.Option("", help="Comma-separated tags."),
     source_session_id: str | None = typer.Option(None, help="Optional source session id."),
+    format: str = typer.Option("text", "--format", help="Output format: text or json."),
 ) -> None:
     """Add a memory record manually."""
 
@@ -183,6 +211,19 @@ def add_memory(
         tags=[tag.strip() for tag in tags.split(",") if tag.strip()],
         source_session_id=source_session_id,
     )
+    if format == "json":
+        typer.echo(
+            json.dumps(
+                {
+                    "id": record.id,
+                    "content": record.content,
+                    "tags": record.tags,
+                    "created_at": record.created_at,
+                },
+                ensure_ascii=False,
+            )
+        )
+        return
     typer.echo(f"Saved memory {record.id}")
 
 
