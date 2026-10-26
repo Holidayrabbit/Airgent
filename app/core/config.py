@@ -45,6 +45,7 @@ class Settings(BaseSettings):
     db_path: Path | None = None
     skills_root: Path | None = None
     skills_user_root: Path | None = None
+    skills_install_root: Path | None = None
     memory_search_limit: int = 5
     session_list_limit: int = 50
 
@@ -132,6 +133,18 @@ class Settings(BaseSettings):
     cost_tracking_enabled: bool = Field(default=False, validation_alias="AIRGENT_COST_TRACKING")
     max_budget_usd: float = Field(default=0.0, ge=0.0, validation_alias="AIRGENT_MAX_BUDGET_USD")
 
+    # Hybrid memory retrieval (mem0-style semantic + keyword fusion). Requires
+    # an OpenAI-compatible embeddings endpoint (OPENAI_BASE_URL) and the
+    # optional sqlite-vec extension (`uv sync --extra memory`).
+    memory_embeddings_enabled: bool = Field(default=False, validation_alias="AIRGENT_MEMORY_EMBEDDINGS")
+    embedding_model: str = Field(default="text-embedding-3-small", validation_alias="AIRGENT_EMBEDDING_MODEL")
+
+    # Stream rules (omp-style time-traveling rules): regex patterns that abort
+    # the assistant stream mid-token, inject the rule instruction, and retry.
+    stream_rules_enabled: bool = Field(default=False, validation_alias="AIRGENT_STREAM_RULES")
+    stream_rules_config_path: Path | None = None
+    stream_rules_max_retries: int = Field(default=2, ge=0, le=5, validation_alias="AIRGENT_STREAM_RULES_MAX_RETRIES")
+
     def ensure_directories(self) -> None:
         self.project_root.mkdir(parents=True, exist_ok=True)
         self.data_dir.mkdir(parents=True, exist_ok=True)
@@ -148,6 +161,14 @@ class Settings(BaseSettings):
     @property
     def skills_user_dir(self) -> Path:
         return self.skills_user_root or (Path.home() / ".agents" / "skills")
+
+    @property
+    def skills_install_dir(self) -> Path:
+        return self.skills_install_root or (self.data_dir / "skills")
+
+    @property
+    def stream_rules_config(self) -> Path:
+        return self.stream_rules_config_path or (self.data_dir / "stream-rules.json")
 
     @property
     def mcp_config(self) -> Path:
@@ -183,6 +204,8 @@ class Settings(BaseSettings):
             "memory_decay": self.memory_decay_halflife_days > 0,
             "memory_core_blocks": self.memory_core_blocks,
             "memory_dedup": self.memory_dedup,
+            "memory_embeddings": self.memory_embeddings_enabled,
+            "stream_rules": self.stream_rules_enabled,
             "tracing": self.tracing_enabled,
             "cost_tracking": self.cost_tracking_enabled,
             "budget_usd": self.max_budget_usd if self.max_budget_usd > 0 else False,

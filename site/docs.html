@@ -45,6 +45,7 @@
         <a href="#/plan" data-page="plan">Plan mode</a>
         <a href="#/cost" data-page="cost">Cost tracking</a>
         <a href="#/hooks" data-page="hooks">Hooks</a>
+        <a href="#/stream-rules" data-page="stream-rules">Stream rules</a>
         <a href="#/tracing" data-page="tracing">Tracing</a>
       </div>
     </div>
@@ -55,6 +56,12 @@
         <a href="#/core-blocks" data-page="core-blocks">Core blocks</a>
         <a href="#/auto-extract" data-page="auto-extract">Auto-extract</a>
         <a href="#/decay" data-page="decay">Decay &amp; dedup</a>
+      </div>
+    </div>
+    <div class="group">
+      <div class="group-label">Integrate</div>
+      <div class="links">
+        <a href="#/mcp-server" data-page="mcp-server">MCP server</a>
       </div>
     </div>
     <div class="group">
@@ -404,8 +411,28 @@ case "$payload" in *'"rm -rf"'*) echo "destructive input"; exit 2;; esac
 exit 0</pre>
     </section>
 
-    <section class="doc-page" data-page="tracing" data-group="Capabilities">
+    <section class="doc-page" data-page="stream-rules" data-group="Capabilities">
       <div class="eyebrow">§ capabilities / 10</div>
+      <h1>Stream rules</h1>
+      <p>omp-style <strong>time-traveling rules</strong>: regex patterns that abort the assistant stream mid-token, inject the instruction, and replay the task. Off by default (<code class="inline">AIRGENT_STREAM_RULES=1</code>).</p>
+      <pre class="block"><span class="c"># ~/.airgent/stream-rules.json</span>
+{
+  "rules": [
+    {
+      "pattern": "rm\\s+-rf\\s+/",
+      "instruction": "Never run destructive commands; propose a safe alternative."
+    }
+  ]
+}</pre>
+      <ul>
+        <li>Matching runs against the accumulated assistant text as it streams; the kernel's <code class="inline">abort</code> fires the moment a rule matches.</li>
+        <li>The task replays with a retry prompt carrying the rule instruction; up to <code class="inline">AIRGENT_STREAM_RULES_MAX_RETRIES</code> (default 2) replays per turn.</li>
+        <li>Surfaces receive a <code class="inline">rule_triggered</code> progress event; with the flag off, behavior is unchanged.</li>
+      </ul>
+    </section>
+
+    <section class="doc-page" data-page="tracing" data-group="Capabilities">
+      <div class="eyebrow">§ capabilities / 11</div>
       <h1>Tracing</h1>
       <p>With <code class="inline">AIRGENT_TRACING=1</code>, every turn records trace events into SQLite (table <code class="inline">trace_events</code>):</p>
       <ul>
@@ -493,6 +520,27 @@ airgent memory delete-block goals</pre>
     </section>
 
     <!-- ========================== REFERENCE ========================== -->
+    <section class="doc-page" data-page="mcp-server" data-group="Integrate">
+      <div class="eyebrow">§ integrate / 01</div>
+      <h1>MCP server</h1>
+      <p>Airgent itself speaks MCP: <code class="inline">airgent mcp-serve</code> runs a stdio MCP server (JSON-RPC 2.0, newline-delimited) with zero extra dependencies, so Claude Desktop and other agents can use Airgent's memory, sessions, and kernel as tools.</p>
+      <pre class="block">{
+  "mcpServers": {
+    "airgent": {
+      "command": "uv",
+      "args": ["--directory", "/path/to/Airgent", "run", "airgent", "mcp-serve"]
+    }
+  }
+}</pre>
+      <table class="tbl">
+        <tr><th>Tool</th><th>Purpose</th></tr>
+        <tr><td><code>memory_search</code> / <code>memory_add</code></td><td>Long-term memory (hybrid when embeddings are on)</td></tr>
+        <tr><td><code>sessions_list</code> / <code>session_get</code></td><td>Recent sessions and transcripts</td></tr>
+        <tr><td><code>agent_run</code></td><td>Run the agent (blocking, can take minutes; supports <code class="inline">plan</code> mode)</td></tr>
+      </table>
+      <div class="callout"><b>Same guardrails</b> — agent_run runs with the same permission tiers and sandbox as local surfaces; headless prompts are auto-denied.</div>
+    </section>
+
     <section class="doc-page" data-page="configuration" data-group="Reference">
       <div class="eyebrow">§ reference / 01</div>
       <h1>Configuration</h1>
@@ -519,6 +567,8 @@ airgent memory delete-block goals</pre>
         <tr><td><code>AIRGENT_HOOKS</code></td><td><code>1</code> (+<code>_CONFIG</code>; before_tool/after_tool entries deploy tool hooks)</td></tr>
         <tr><td><code>AIRGENT_SANDBOX_MODE</code></td><td><code>read-only | workspace-write | full</code> (tier for every sandbox provider)</td></tr>
         <tr><td><code>AIRGENT_COST_TRACKING</code> / <code>AIRGENT_MAX_BUDGET_USD</code></td><td><code>1</code> / <code>USD</code> (0 = off)</td></tr>
+        <tr><td><code>AIRGENT_MEMORY_EMBEDDINGS</code> / <code>AIRGENT_EMBEDDING_MODEL</code></td><td><code>1</code> / model id (hybrid retrieval, needs sqlite-vec)</td></tr>
+        <tr><td><code>AIRGENT_STREAM_RULES</code> / <code>AIRGENT_STREAM_RULES_MAX_RETRIES</code></td><td><code>1</code> / <code>0-5</code> (time-traveling rules)</td></tr>
         <tr><td><code>AIRGENT_MEMORY_DEDUP</code> / <code>_DECAY_DAYS</code> / <code>_CORE_BLOCKS</code> / <code>_AUTO_EXTRACT</code></td><td><code>1</code> / <code>N</code> / <code>1</code> / <code>1</code></td></tr>
         <tr><td><code>AIRGENT_TRACING</code></td><td><code>1</code></td></tr>
       </table>

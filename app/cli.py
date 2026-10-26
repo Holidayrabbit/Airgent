@@ -359,6 +359,15 @@ def cron_trigger(job_id: str) -> None:
     typer.echo(f"Triggered {job_id} ({job.name}) — running in background.")
 
 
+@app.command("mcp-serve")
+def mcp_serve() -> None:
+    """Serve Airgent as an MCP stdio server (memory, sessions, agent_run)."""
+
+    from app.mcp_server import main as mcp_main
+
+    mcp_main()
+
+
 @app.command()
 def status() -> None:
     """Show Airgent configuration and enabled optional features."""
@@ -415,6 +424,22 @@ def sandbox() -> None:
 # ------------------------------------------------------------------
 # Memory extras (core blocks)
 # ------------------------------------------------------------------
+@memory_app.command("reindex")
+def memory_reindex() -> None:
+    """Backfill embeddings for memories (requires AIRGENT_MEMORY_EMBEDDINGS=1)."""
+
+    services = build_services()
+    if services.store.embedder is None:
+        typer.echo(
+            "Embeddings are off. Set AIRGENT_MEMORY_EMBEDDINGS=1 (and OPENAI_BASE_URL), "
+            "then `uv sync --extra memory` for sqlite-vec.",
+            err=True,
+        )
+        raise typer.Exit(code=1)
+    count = services.store.embed_missing_memories()
+    typer.echo(f"Embedded {count} memories.")
+
+
 @memory_app.command("blocks")
 def memory_blocks() -> None:
     """List core memory blocks (Letta-style always-in-context notes)."""
@@ -523,6 +548,42 @@ def skills_add_dir(path: str) -> None:
     services = build_services()
     SkillRegistry(services.settings).add_extra_dir(path)
     typer.echo(f"Added skills dir {path}")
+
+
+@skills_app.command("install")
+def skills_install(
+    git_url: str,
+    name: str | None = typer.Option(None, "--name", help="Directory name (defaults to the repo stem)."),
+) -> None:
+    """Install a skill package from a git URL (shallow clone)."""
+
+    from app.skills.registry import SkillRegistry
+
+    services = build_services()
+    try:
+        result = SkillRegistry(services.settings).install(git_url, name=name)
+    except (ValueError, OSError) as exc:
+        typer.echo(f"Install failed: {exc}", err=True)
+        raise typer.Exit(code=1)
+    if isinstance(result, list):
+        names = ", ".join(entry.name for entry in result)
+        typer.echo(f"Installed {len(result)} skills from {git_url}: {names}")
+    else:
+        typer.echo(f"Installed skill {result.name} at {result.path}")
+
+
+@skills_app.command("remove")
+def skills_remove(name: str) -> None:
+    """Remove an installed skill package."""
+
+    from app.skills.registry import SkillRegistry
+
+    services = build_services()
+    if SkillRegistry(services.settings).remove(name):
+        typer.echo(f"Removed skill {name}")
+    else:
+        typer.echo(f"Installed skill {name} not found", err=True)
+        raise typer.Exit(code=1)
 
 
 def main() -> None:

@@ -31,6 +31,24 @@ def _days_since(iso_timestamp: str | None) -> float:
     return max(0.0, (datetime.now(UTC) - moment).total_seconds() / 86400.0)
 
 
+def _reciprocal_rank_fusion(
+    *rankings: list[MemoryRecord], limit: int, k: int = 60
+) -> list[MemoryRecord]:
+    """Fuse multiple ranked lists (mem0/BM25-style hybrid retrieval).
+
+    score(memory) = Σ 1 / (k + rank_in_list); ties keep first-seen order.
+    """
+
+    scores: dict[str, float] = {}
+    order: dict[str, MemoryRecord] = {}
+    for ranking in rankings:
+        for position, record in enumerate(ranking):
+            scores[record.id] = scores.get(record.id, 0.0) + 1.0 / (k + position + 1)
+            order.setdefault(record.id, record)
+    fused_ids = sorted(scores, key=lambda memory_id: scores[memory_id], reverse=True)[:limit]
+    return [order[memory_id] for memory_id in fused_ids]
+
+
 def _loads_json_list(raw: str | None) -> list[str]:
     if not raw:
         return []
@@ -88,15 +106,46 @@ class MemoryBlock:
 
 
 class LocalStore:
-    def __init__(self, db_path: Path, *, dedup: bool = False) -> None:
+    def __init__(
+        self,
+        db_path: Path,
+        *,
+        dedup: bool = False,
+        embedder: Any | None = None,
+    ) -> None:
         self.db_path = db_path
         self.dedup = dedup
+        self.embedder = embedder
+        self._vec_available: bool | None = None
         self.initialize()
 
     def _connect(self) -> sqlite3.Connection:
         connection = sqlite3.connect(self.db_path)
         connection.row_factory = sqlite3.Row
+        if self.embedder is not None:
+            self._load_vec_extension(connection)
         return connection
+
+    def _load_vec_extension(self, connection: sqlite3.Connection) -> None:
+        """Load sqlite-vec once; unavailable extension degrades to keyword search."""
+
+        if self._vec_available is not None:
+            if self._vec_available:
+                connection.enable_load_extension(True)
+                import sqlite_vec
+
+                connection.load_extension(sqlite_vec.loadable_path())
+                connection.enable_load_extension(False)
+            return
+        try:
+            import sqlite_vec
+
+            connection.enable_load_extension(True)
+            connection.load_extension(sqlite_vec.loadable_path())
+            connection.enable_load_extension(False)
+            self._vec_available = True
+        except Exception:
+            self._vec_available = False
 
     def initialize(self) -> None:
         with self._connect() as connection:
@@ -197,6 +246,23 @@ class LocalStore:
                 kind TEXT NOT NULL,
                 payload_json TEXT NOT NULL DEFAULT '{}',
                 created_at TEXT NOT NULL
+            )
+            """
+        )
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS vector_meta (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                dimension INTEGER NOT NULL,
+                model TEXT NOT NULL DEFAULT ''
+            )
+            """
+        )
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS memory_embeddings (
+                memory_rowid INTEGER PRIMARY KEY,
+                model TEXT NOT NULL DEFAULT ''
             )
             """
         )
@@ -498,7 +564,7 @@ class LocalStore:
             updated_at=utcnow(),
         )
         with self._connect() as connection:
-            connection.execute(
+            cursor = connection.execute(
                 """
                 INSERT INTO memories(id, content, tags_json, source_session_id, created_at,
                                      kind, importance, access_count, last_accessed_at, updated_at)
@@ -515,6 +581,16 @@ class LocalStore:
                     record.updated_at,
                 ),
             )
+            memory_rowid = cursor.lastrowid
+        if memory_rowid is not None and self._vec_ready():
+            # Best effort: a failed embedding must never lose the memory.
+            try:
+                with self._connect() as vec_connection:
+                    self._ensure_vec_table(vec_connection, self.embedder.dimension or 0)  # type: ignore[attr-defined]
+                    vector = self.embedder.embed_one(record.content)  # type: ignore[union-attr]
+                    self._store_vector(vec_connection, memory_rowid, vector)
+            except Exception:
+                pass
         return record
 
     @staticmethod
@@ -546,8 +622,17 @@ class LocalStore:
 
     def delete_memory(self, memory_id: str) -> bool:
         with self._connect() as connection:
-            cursor = connection.execute("DELETE FROM memories WHERE id = ?", (memory_id,))
-        return cursor.rowcount > 0
+            row = connection.execute("SELECT rowid FROM memories WHERE id = ?", (memory_id,)).fetchone()
+            if row is None:
+                return False
+            connection.execute("DELETE FROM memories WHERE id = ?", (memory_id,))
+            connection.execute("DELETE FROM memory_embeddings WHERE memory_rowid = ?", (row["rowid"],))
+            if self._vec_ready():
+                try:
+                    connection.execute("DELETE FROM memory_vec WHERE rowid = ?", (row["rowid"],))
+                except Exception:
+                    pass
+        return True
 
     @staticmethod
     def _memory_from_row(row: sqlite3.Row) -> MemoryRecord:
@@ -583,10 +668,129 @@ class LocalStore:
         limit: int = 5,
         decay_halflife_days: int = 0,
     ) -> list[MemoryRecord]:
+        keyword_ranked = self._keyword_ranked(query, decay_halflife_days=decay_halflife_days)
+        vector_ranked = self._vector_ranked(query) if self.embedder is not None else []
+        if not vector_ranked:
+            selected = keyword_ranked[:limit]
+        else:
+            selected = _reciprocal_rank_fusion(keyword_ranked, vector_ranked, limit=limit)
+        if selected:
+            self._touch_memory(*(record.id for record in selected))
+        return selected
+
+    # ------------------------------------------------------------------
+    # Vector search (hybrid retrieval)
+    # ------------------------------------------------------------------
+    def _vec_ready(self) -> bool:
+        return self.embedder is not None and self._vec_available is True
+
+    def _ensure_vec_table(self, connection: sqlite3.Connection, dimension: int) -> None:
+        meta = connection.execute("SELECT dimension FROM vector_meta WHERE id = 1").fetchone()
+        if meta is not None and meta["dimension"] == dimension:
+            return
+        # (Re)create: different dimension means a different embedding model.
+        connection.execute("DROP TABLE IF EXISTS memory_vec")
+        connection.execute(
+            f"CREATE VIRTUAL TABLE memory_vec USING vec0(embedding float[{dimension}])"
+        )
+        connection.execute("DELETE FROM vector_meta")
+        connection.execute(
+            "INSERT INTO vector_meta(id, dimension, model) VALUES(1, ?, ?)",
+            (dimension, self.embedder.model if self.embedder else ""),
+        )
+        connection.execute("DELETE FROM memory_embeddings")
+        connection.commit()
+
+    @staticmethod
+    def _serialize_vector(vector: list[float]) -> bytes:
+        import struct
+
+        return struct.pack(f"<{len(vector)}f", *vector)
+
+    def _store_vector(self, connection: sqlite3.Connection, memory_rowid: int, vector: list[float]) -> None:
+        connection.execute(
+            "INSERT INTO memory_vec(rowid, embedding) VALUES(?, ?)",
+            (memory_rowid, self._serialize_vector(vector)),
+        )
+        connection.execute(
+            "INSERT INTO memory_embeddings(memory_rowid, model) VALUES(?, ?)",
+            (memory_rowid, self.embedder.model if self.embedder else ""),
+        )
+
+    def embed_missing_memories(self, *, batch_size: int = 32) -> int:
+        """Backfill embeddings for memories that lack one; returns count."""
+
+        if not self._vec_ready():
+            return 0
+        with self._connect() as connection:
+            self._ensure_vec_table(connection, self.embedder.dimension or 0)  # type: ignore[attr-defined]
+            rows = connection.execute(
+                """
+                SELECT m.rowid AS rowid, m.content AS content
+                FROM memories m
+                LEFT JOIN memory_embeddings e ON e.memory_rowid = m.rowid
+                WHERE e.memory_rowid IS NULL
+                ORDER BY m.rowid ASC
+                """
+            ).fetchall()
+        embedded = 0
+        for start in range(0, len(rows), batch_size):
+            batch = rows[start : start + batch_size]
+            try:
+                vectors = self.embedder.embed([row["content"] for row in batch])  # type: ignore[union-attr]
+            except Exception:
+                break
+            with self._connect() as connection:
+                for row, vector in zip(batch, vectors):
+                    self._store_vector(connection, row["rowid"], vector)
+                connection.commit()
+            embedded += len(batch)
+        return embedded
+
+    def _vector_ranked(self, query: str, *, limit: int = 40) -> list[MemoryRecord]:
+        """Nearest memories by cosine distance; empty on any failure."""
+
+        if not self._vec_ready():
+            return []
+        try:
+            query_vector = self.embedder.embed_one(query)  # type: ignore[union-attr]
+        except Exception:
+            return []
+        with self._connect() as connection:
+            meta = connection.execute("SELECT dimension FROM vector_meta WHERE id = 1").fetchone()
+            if meta is None or len(query_vector) != meta["dimension"]:  # type: ignore[index]
+                return []
+            try:
+                rows = connection.execute(
+                    """
+                    SELECT v.rowid, distance
+                    FROM memory_vec v
+                    WHERE embedding MATCH ?
+                      AND k = ?
+                    ORDER BY distance
+                    """,
+                    (self._serialize_vector(query_vector), limit),
+                ).fetchall()
+            except Exception:
+                return []
+            ranked: list[MemoryRecord] = []
+            for row in rows:
+                record_row = connection.execute(
+                    "SELECT * FROM memories WHERE rowid = ?", (row["rowid"],)
+                ).fetchone()
+                if record_row is not None:
+                    ranked.append(self._memory_from_row(record_row))
+        return ranked
+
+    def _keyword_ranked(
+        self, query: str, *, decay_halflife_days: int = 0, limit: int = 40
+    ) -> list[MemoryRecord]:
+        """The pre-existing keyword ranking, unbounded by the final limit."""
+
         tokens = [token for token in {part.lower() for part in query.split()} if token]
         memories = self.list_memories(limit=500)
         if not tokens:
-            return memories[:limit]
+            return memories
 
         def relevance(record: MemoryRecord) -> float:
             haystack = f"{record.content.lower()} {' '.join(record.tags)}"
@@ -602,10 +806,7 @@ class LocalStore:
 
         ranked = [record for record in memories if relevance(record) > 0]
         ranked.sort(key=relevance, reverse=True)
-        selected = ranked[:limit]
-        if selected:
-            self._touch_memory(*(record.id for record in selected))
-        return selected
+        return ranked[:limit]
 
     def _touch_memory(self, *memory_ids: str) -> None:
         """Record retrieval access (feeds the decay clock)."""

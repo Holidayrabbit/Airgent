@@ -137,8 +137,26 @@
     <div class="card">
       <div class="icon">◉</div>
       <h3>Memory system</h3>
-      <p>Kinds &amp; importance, time decay on access, near-duplicate merging, Letta-style core blocks, and automatic fact extraction.</p>
-      <span class="flag">AIRGENT_MEMORY_*</span>
+      <p>Kinds &amp; importance, time decay on access, near-duplicate merging, Letta-style core blocks, automatic fact extraction — and hybrid semantic + keyword retrieval (sqlite-vec, RRF fusion).</p>
+      <span class="flag">AIRGENT_MEMORY_EMBEDDINGS=1</span>
+    </div>
+    <div class="card">
+      <div class="icon">⤓</div>
+      <h3>Skills install</h3>
+      <p>Install skill packages from any git URL with a shallow clone; single skills and collections both load through the kernel's --skill flag.</p>
+      <span class="flag">airgent skills install &lt;url&gt;</span>
+    </div>
+    <div class="card">
+      <div class="icon">⇈</div>
+      <h3>MCP server</h3>
+      <p>Airgent itself speaks MCP: other agents (Claude Desktop, other CLIs) consume its memory, sessions, and kernel as tools over stdio.</p>
+      <span class="flag">airgent mcp-serve</span>
+    </div>
+    <div class="card">
+      <div class="icon">⏪</div>
+      <h3>Stream rules</h3>
+      <p>omp-style time-traveling rules: regex patterns abort the stream mid-token, inject the instruction, and replay the task.</p>
+      <span class="flag">AIRGENT_STREAM_RULES=1</span>
     </div>
     <div class="card">
       <div class="icon">⌗</div>

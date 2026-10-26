@@ -141,6 +141,10 @@ need it (`airgent status` shows what is enabled; `GET /api/v1/features` over HTT
 | Plan mode | always on | Read-only runs that end in an implementation proposal: `airgent chat "design X" --plan`, TUI `/plan <task>`, or `"plan": true` on the API. Write tools are blocked for the run; the user approves before anything executes. |
 | Cost tracking | `AIRGENT_COST_TRACKING=1` | Records per-run token/cost usage from the kernel into the transcript; `airgent cost` shows cumulative spend, and `AIRGENT_MAX_BUDGET_USD` (0 = off) refuses further runs once crossed. |
 | Memory upgrades | see below | kinds/importance, time decay, dedup, core memory blocks, automatic fact extraction. |
+| Hybrid retrieval | `AIRGENT_MEMORY_EMBEDDINGS=1` | mem0-style semantic + keyword fusion (RRF) via an OpenAI-compatible embeddings endpoint and sqlite-vec (`uv sync --extra memory`); `airgent memory reindex` backfills. Degrades to keyword-only on any failure. |
+| Skills install | always on | `airgent skills install <git-url>` shallow-clones a skill package (or collection) into `~/.airgent/skills` and loads it via pi's `--skill` flag; `skills remove` deletes it. |
+| MCP server | always on | `airgent mcp-serve` exposes memory search/add, sessions, and `agent_run` over the MCP stdio protocol — other agents (Claude Desktop etc.) can use Airgent as a tool. |
+| Stream rules | `AIRGENT_STREAM_RULES=1` | omp-style time-traveling rules: regex patterns abort the assistant stream mid-token, inject the rule instruction, and replay the task (bounded retries). Config: `~/.airgent/stream-rules.json`. |
 | Tracing | `AIRGENT_TRACING=1` | Persists per-run trace events (`turn_start`/`turn_end`/`turn_error`/`usage`) to SQLite for observability. |
 
 Memory upgrades (inspired by mem0 / Letta / Zep):

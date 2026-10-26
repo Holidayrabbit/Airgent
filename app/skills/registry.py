@@ -11,12 +11,22 @@ plus any extra dirs), giving per-skill kill switches.
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
 import yaml
 
 from app.core.config import Settings
+
+_SKILL_NAME_OK = re.compile(r"^[a-z0-9][a-z0-9-]*$")
+
+
+def _url_stem(url: str) -> str:
+    stem = url.rstrip("/").rsplit("/", 1)[-1]
+    if stem.endswith(".git"):
+        stem = stem[:-4]
+    return stem.lower()
 
 
 @dataclass(frozen=True)
@@ -121,6 +131,10 @@ class SkillRegistry:
             if entry.name not in seen:
                 entries.append(entry)
                 seen.add(entry.name)
+        for entry in _scan_skills_dir(settings.skills_install_dir, "installed"):
+            if entry.name not in seen:
+                entries.append(entry)
+                seen.add(entry.name)
         for raw in self.load_state().extra_dirs:
             extra = Path(raw).expanduser().resolve()
             for entry in _scan_skills_dir(extra, "extra"):
@@ -167,6 +181,60 @@ class SkillRegistry:
         if resolved not in state.extra_dirs:
             state.extra_dirs.append(resolved)
         self.save_state(state)
+
+    # -------------------------------------------------------------- installed
+    def install(self, git_url: str, *, name: str | None = None) -> SkillEntry | list[SkillEntry]:
+        """Shallow-clone a git repo into the install dir and return its skills.
+
+        Works with any git URL (or a local path). Name defaults to the URL
+        stem; the clone is recursive-scanned, so both single-skill repos and
+        multi-skill collections land naturally.
+        """
+
+        import subprocess
+
+        resolved_name = (name or _url_stem(git_url)).strip()
+        if not _SKILL_NAME_OK.fullmatch(resolved_name):
+            raise ValueError(
+                f"Invalid skill name {resolved_name!r}: lowercase letters, digits, hyphens only"
+            )
+        target = self.settings.skills_install_dir / resolved_name
+        if target.exists():
+            raise ValueError(
+                f"'{resolved_name}' already exists at {target}; remove it first "
+                f"(airgent skills remove {resolved_name}) or pass --name."
+            )
+        target.parent.mkdir(parents=True, exist_ok=True)
+        result = subprocess.run(
+            ["git", "clone", "--depth", "1", git_url, str(target)],
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        if result.returncode != 0:
+            raise ValueError(f"git clone failed: {(result.stderr or result.stdout).strip()[:300]}")
+        skills = _scan_skills_dir(target, "installed")
+        if not skills:
+            import shutil
+
+            shutil.rmtree(target, ignore_errors=True)
+            raise ValueError("no SKILL.md found anywhere in the repository")
+        return skills[0] if len(skills) == 1 else skills
+
+    def remove(self, name: str) -> bool:
+        """Delete an installed skill directory; returns False if unknown."""
+
+        import shutil
+
+        target = (self.settings.skills_install_dir / name).resolve()
+        install_root = self.settings.skills_install_dir.resolve()
+        if install_root not in target.parents or not target.is_dir():
+            return False
+        shutil.rmtree(target)
+        return True
+
+    def installed_entries(self) -> list[SkillEntry]:
+        return _scan_skills_dir(self.settings.skills_install_dir, "installed")
 
     # ----------------------------------------------------------------- output
     def enabled_entries(self) -> list[SkillEntry]:

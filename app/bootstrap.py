@@ -22,7 +22,16 @@ class AppServices:
 
 def build_services(settings: Settings | None = None) -> AppServices:
     resolved_settings = settings or get_settings()
-    store = LocalStore(resolved_settings.db_path, dedup=resolved_settings.memory_dedup)
+    embedder = None
+    if resolved_settings.memory_embeddings_enabled and resolved_settings.openai_base_url:
+        from app.memory.embeddings import EmbeddingClient
+
+        embedder = EmbeddingClient(
+            base_url=resolved_settings.openai_base_url,
+            api_key=resolved_settings.openai_api_key,
+            model=resolved_settings.embedding_model,
+        )
+    store = LocalStore(resolved_settings.db_path, dedup=resolved_settings.memory_dedup, embedder=embedder)
     store.initialize_cron()
     context_builder = ContextBuilder(
         store=store,

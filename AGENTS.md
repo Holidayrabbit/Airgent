@@ -39,9 +39,16 @@
 
 ### Memory / 存储
 
-- Memory Store（transcripts + memories[kind/importance/decay/dedup] + memory_blocks + trace_events + kernel_sessions）：`app/memory/store.py`
+- Memory Store（transcripts + memories[kind/importance/decay/dedup] + 向量检索 + memory_blocks + trace_events + kernel_sessions）：`app/memory/store.py`
+- 混合检索（语义 + 关键词 RRF 融合，sqlite-vec 可选依赖）：`app/memory/embeddings.py` + store 的 `_vector_ranked`/`embed_missing_memories`
 - Memory 上下文构建（core blocks 与记忆注入）：`app/memory/context_builder.py`
 - 自动事实抽取（mem0 风格，启发式）：`app/memory/auto_extract.py`
+
+### 集成接口 / 流式规则
+
+- MCP server（memory/sessions/agent_run 暴露给其他 agent）：`app/mcp_server.py`（`airgent mcp-serve`）
+- Stream rules（正则中止流 + 规则重注入 + 重试）：`app/kernel/manager.py`（`_load_stream_rules`/`_consume_run`，配置 `~/.airgent/stream-rules.json`）
+- Skills 安装（git 浅克隆 + pi --skill）：`app/skills/registry.py` 的 `install`/`remove`
 
 ### 可选能力（默认全关）
 
@@ -86,7 +93,7 @@
 ## Cursor Cloud specific instructions
 
 - **包管理器**: 项目使用 `uv`。依赖安装命令为 `uv sync`，运行命令前缀为 `uv run`。
-- **测试**: `uv run pytest` 即可运行全部测试（66 个），无需外部服务。
+- **测试**: `uv run pytest` 即可运行全部测试（97 个），无需外部服务。
 - **启动开发服务器**: `uv run airgent serve --reload`，默认监听 `127.0.0.1:10304`。
 - **环境变量**: 需要 `OPENAI_API_KEY`（必须）和 `OPENAI_BASE_URL`（可选，代理地址）。项目会自动加载 `.env` 文件。模型可用 `AIRGENT_MODEL` 覆盖（如 `anthropic/claude-sonnet-4.5`）。
 - **外部依赖**: 需要 `pi` 内核在 PATH（`curl -fsSL https://pi.dev/install.sh | sh` 或 npm 全局安装）；pi 状态隔离在 `~/.airgent/pi/`。

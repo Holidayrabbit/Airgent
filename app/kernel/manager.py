@@ -9,6 +9,8 @@ keeping pi's own context, tool history, and compaction intact.
 from __future__ import annotations
 
 import asyncio
+import json
+import re
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -24,6 +26,39 @@ from app.memory.store import LocalStore
 ProgressCallback = Callable[[PiEvent], None]
 
 
+@dataclass(frozen=True)
+class StreamRule:
+    pattern: str
+    instruction: str
+    regex: re.Pattern[str]
+
+
+def _load_stream_rules(path: Path) -> list[StreamRule]:
+    """Load omp-style stream rules; malformed entries are skipped."""
+
+    if not path.is_file():
+        return []
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return []
+    rules: list[StreamRule] = []
+    entries = payload.get("rules") if isinstance(payload, dict) else payload
+    for entry in entries or []:
+        if not isinstance(entry, dict):
+            continue
+        pattern = str(entry.get("pattern") or "")
+        instruction = str(entry.get("instruction") or "").strip()
+        if not pattern or not instruction:
+            continue
+        try:
+            regex = re.compile(pattern)
+        except re.error:
+            continue
+        rules.append(StreamRule(pattern=pattern, instruction=instruction, regex=regex))
+    return rules
+
+
 @dataclass
 class _ProcessEntry:
     process: PiProcess
@@ -32,6 +67,13 @@ class _ProcessEntry:
     mode: str = "default"
     pending_ui: dict[str, float] = field(default_factory=dict)
     """Outstanding extension UI requests: id -> deadline (monotonic)."""
+
+
+@dataclass
+class _AttemptOutcome:
+    text: str = ""
+    error_message: str | None = None
+    triggered_rule: StreamRule | None = None
 
 
 @dataclass(frozen=True)
@@ -63,6 +105,20 @@ class PiKernel:
             return environment.provider_model
         return self.settings.default_model
 
+    def _installed_skill_args(self) -> list[str]:
+        """`--skill` args for user-installed skills (explicit opt-in, additive)."""
+
+        try:
+            from app.skills.registry import SkillRegistry
+
+            entries = SkillRegistry(self.settings).installed_entries()
+        except Exception:
+            return []
+        args: list[str] = []
+        for entry in entries:
+            args.extend(["--skill", str(entry.path)])
+        return args
+
     async def _spawn(self, mode: str = "default") -> PiProcess:
         environment = self.prepare()
         command = [
@@ -71,6 +127,7 @@ class PiKernel:
             "rpc",
             "--model",
             self._model_argument(),
+            *self._installed_skill_args(),
         ]
         process = PiProcess(
             command=[*environment.sandbox.argv_prefix, *command],
@@ -183,12 +240,69 @@ class PiKernel:
         on_event: ProgressCallback | None,
         interactive: bool,
     ) -> KernelRunResult:
+        """Run one prompt, applying stream rules with abort + reinject retries."""
+
+        process = entry.process
+        current_message = message
+        outcome: _AttemptOutcome | None = None
+
+        for attempt in range(self.settings.stream_rules_max_retries + 1):
+            outcome = await self._consume_run(entry, current_message, on_event, interactive)
+            if outcome.triggered_rule is None:
+                break
+            # Time-traveling rule: the stream was aborted mid-token; inject
+            # the rule instruction and replay the full task.
+            rule = outcome.triggered_rule
+            if on_event is not None:
+                on_event(
+                    PiEvent(
+                        "rule_triggered",
+                        {"pattern": rule.pattern, "instruction": rule.instruction, "attempt": attempt + 1},
+                    )
+                )
+            current_message = (
+                f"[Airgent stream rule] Your previous response was aborted because it matched "
+                f"the rule /{rule.pattern}/. Instruction: {rule.instruction}\n\n"
+                f"Produce a corrected, complete response to the original request:\n\n{message}"
+            )
+
+        assert outcome is not None
+        await self._deny_all_pending_ui(entry)
+        if outcome.error_message is not None and not outcome.text:
+            raise KernelError(outcome.error_message)
+
+        await self.record_pi_session(session_id)
+        state = await self._safe_state(process) or {}
+        return KernelRunResult(
+            text=outcome.text,
+            session_id=session_id,
+            pi_session_id=str(state.get("sessionId") or ""),
+            model=entry.model,
+            stats=await self._session_stats(process),
+        )
+
+    def _stream_rules(self) -> list[StreamRule]:
+        if not hasattr(self, "_stream_rules_cache"):
+            self._stream_rules_cache = _load_stream_rules(self.settings.stream_rules_config)
+        return self._stream_rules_cache
+
+    async def _consume_run(
+        self,
+        entry: _ProcessEntry,
+        message: str,
+        on_event: ProgressCallback | None,
+        interactive: bool,
+    ) -> _AttemptOutcome:
+        """Drive one prompt to a natural stop (agent_end / error / settle)."""
+
         process = entry.process
         fallback_text = ""
         current_message_parts: list[str] | None = None
         end_text: str | None = None
         error_message: str | None = None
         saw_agent_end = False
+        triggered_rule: StreamRule | None = None
+        rules = self._stream_rules() if self.settings.stream_rules_enabled else []
 
         def emit(event: PiEvent) -> None:
             if on_event is not None:
@@ -237,6 +351,23 @@ class PiKernel:
                 if current_message_parts is None:
                     current_message_parts = []
                 current_message_parts.append(event.data.get("delta", ""))
+                if (
+                    triggered_rule is None
+                    and rules
+                    and current_message_parts
+                    and not entry.pending_ui
+                ):
+                    streamed = "".join(current_message_parts)
+                    for rule in rules:
+                        if rule.regex.search(streamed):
+                            triggered_rule = rule
+                            try:
+                                await asyncio.wait_for(
+                                    process.request("abort"), timeout=self.settings.pi_request_timeout_seconds
+                                )
+                            except KernelError:
+                                pass
+                            break
             elif event.kind == "text_end":
                 if current_message_parts is not None:
                     fallback_text = "".join(current_message_parts).strip()
@@ -247,24 +378,14 @@ class PiKernel:
             emit(event)
 
         final_text = end_text or fallback_text
-        if not final_text and error_message is None:
+        if triggered_rule is None and not final_text and error_message is None:
             # No agent_end within the window or empty transcript.
             if not await self._is_idle(process):
                 raise KernelError("pi run did not settle")
-        await self._deny_all_pending_ui(entry)
-
-        await self.record_pi_session(session_id)
-        await self._deny_all_pending_ui(entry)
-        if error_message is not None and not final_text:
-            raise KernelError(error_message)
-
-        state = await self._safe_state(process) or {}
-        return KernelRunResult(
+        return _AttemptOutcome(
             text=final_text,
-            session_id=session_id,
-            pi_session_id=str(state.get("sessionId") or ""),
-            model=entry.model,
-            stats=await self._session_stats(process),
+            error_message=error_message,
+            triggered_rule=triggered_rule,
         )
 
     @staticmethod

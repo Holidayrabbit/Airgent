@@ -17,6 +17,11 @@ dependencies = [
 [project.scripts]
 airgent = "app.cli:main"
 
+[project.optional-dependencies]
+memory = [
+    "sqlite-vec>=0.1.6",
+]
+
 [dependency-groups]
 dev = [
     "pytest>=8.3.0",

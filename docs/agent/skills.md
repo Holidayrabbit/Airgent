@@ -30,3 +30,21 @@ airgent skills add-dir ~/more-skills
 The registry only controls *which skills load*. It is not a security
 boundary — treat it as prompt hygiene, and use the sandbox/guardrails for
 hard isolation.
+
+## Installing skill packages
+
+```bash
+airgent skills install https://github.com/badlogic/pi-skills
+airgent skills install https://github.com/anthropics/skills --name anthropic
+airgent skills list
+airgent skills remove pi-skills
+```
+
+- Shallow clone (`git clone --depth 1`) into `~/.airgent/skills/<name>`;
+  name defaults to the repo stem.
+- Both single-skill repos (a `SKILL.md` at the root) and collections
+  (skill subdirectories) work — the install dir is scanned recursively.
+- Installed skills load through pi's repeatable `--skill <path>` flag, so
+  they work regardless of the registry; review what you install, since a
+  skill can instruct the model to do anything.
+

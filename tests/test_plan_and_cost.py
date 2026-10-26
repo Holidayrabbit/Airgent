@@ -206,6 +206,6 @@ def test_hook_service_still_loads_turn_hooks(tmp_path: Path) -> None:
     service = HookService(_settings(tmp_path, hooks_enabled=True, hooks_config=config))
 
     async def scenario() -> None:
-        outcome = await service.run("before_run", {"input": "x"})
+        await service.run("before_run", {"input": "x"})
 
     asyncio.run(scenario())  # no before_run entries: ok=True noop
