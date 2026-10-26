@@ -26,7 +26,6 @@ def build_services(settings: Settings | None = None) -> AppServices:
     store.initialize_cron()
     context_builder = ContextBuilder(
         store=store,
-        transcript_limit=resolved_settings.transcript_context_limit,
         memory_limit=resolved_settings.memory_search_limit,
         decay_halflife_days=resolved_settings.memory_decay_halflife_days,
         core_blocks=resolved_settings.memory_core_blocks,

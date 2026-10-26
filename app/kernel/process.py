@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-from collections.abc import AsyncIterator
 from typing import Any
 
 from app.kernel.errors import KernelError
@@ -104,12 +103,6 @@ class PiProcess:
         if not response.get("success"):
             raise KernelError(str(response.get("error") or f"{command_type} failed"))
         return response.get("data") or {}
-
-    async def events(self) -> AsyncIterator[dict[str, Any]]:
-        while True:
-            record = await self._event_queue.get()
-            self._event_queue.task_done()
-            yield record
 
     async def next_event(self, timeout: float | None = None) -> dict[str, Any] | None:
         if timeout is None:

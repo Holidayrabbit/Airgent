@@ -69,7 +69,7 @@ def test_pi_memory_tools_keep_native_summaries() -> None:
 
 
 def test_chat_renders_execution_in_main_thread(tmp_path) -> None:
-    tui = AirgentTUI(services=_fake_services(tmp_path), agent_key="root_assistant", max_turns=8)
+    tui = AirgentTUI(services=_fake_services(tmp_path), agent_key="root_assistant")
     tui.state.messages = [("user", "查看你工作目录的readme")]
     tui.state.busy = True
     tui.state.execution_log = [
@@ -88,7 +88,7 @@ def test_chat_renders_execution_in_main_thread(tmp_path) -> None:
 
 
 def test_chat_source_lines_keep_full_transcript(tmp_path) -> None:
-    tui = AirgentTUI(services=_fake_services(tmp_path), agent_key="root_assistant", max_turns=8)
+    tui = AirgentTUI(services=_fake_services(tmp_path), agent_key="root_assistant")
     tui.state.messages = [("user", f"message {i}") for i in range(20)]
 
     source_lines = tui._chat_source_lines()
@@ -99,7 +99,7 @@ def test_chat_source_lines_keep_full_transcript(tmp_path) -> None:
 
 
 def test_chat_scroll_follows_latest_render_height(tmp_path) -> None:
-    tui = AirgentTUI(services=_fake_services(tmp_path), agent_key="root_assistant", max_turns=8)
+    tui = AirgentTUI(services=_fake_services(tmp_path), agent_key="root_assistant")
     tui.chat_window.render_info = SimpleNamespace(window_height=10, window_width=80)
     tui.state.messages = [("assistant", "\n".join(f"line {i}" for i in range(36)))]
     tui.state.follow_latest_chat = True
@@ -111,7 +111,7 @@ def test_chat_scroll_follows_latest_render_height(tmp_path) -> None:
 
 
 def test_chat_scroll_can_browse_up_and_return_to_latest(tmp_path) -> None:
-    tui = AirgentTUI(services=_fake_services(tmp_path), agent_key="root_assistant", max_turns=8)
+    tui = AirgentTUI(services=_fake_services(tmp_path), agent_key="root_assistant")
     tui.chat_window.render_info = SimpleNamespace(window_height=10, window_width=80)
     tui._invalidate = lambda: None
     tui.state.messages = [("assistant", "\n".join(f"line {i}" for i in range(30)))]
@@ -130,7 +130,7 @@ def test_chat_scroll_can_browse_up_and_return_to_latest(tmp_path) -> None:
 
 
 def test_after_render_pins_chat_to_bottom_when_following_latest(tmp_path) -> None:
-    tui = AirgentTUI(services=_fake_services(tmp_path), agent_key="root_assistant", max_turns=8)
+    tui = AirgentTUI(services=_fake_services(tmp_path), agent_key="root_assistant")
     tui.chat_window.render_info = SimpleNamespace(window_height=10, window_width=80)
     tui.state.messages = [("assistant", "\n".join(f"line {i}" for i in range(42)))]
     tui.state.chat_scroll = 0
@@ -149,7 +149,7 @@ def test_after_render_pins_chat_to_bottom_when_following_latest(tmp_path) -> Non
 
 
 def test_after_render_clamps_manual_scroll_when_height_shrinks(tmp_path) -> None:
-    tui = AirgentTUI(services=_fake_services(tmp_path), agent_key="root_assistant", max_turns=8)
+    tui = AirgentTUI(services=_fake_services(tmp_path), agent_key="root_assistant")
     tui.chat_window.render_info = SimpleNamespace(window_height=10, window_width=80)
     tui.state.messages = [("assistant", "\n".join(f"line {i}" for i in range(18)))]
     tui.state.chat_scroll = 20
@@ -168,7 +168,7 @@ def test_after_render_clamps_manual_scroll_when_height_shrinks(tmp_path) -> None
 
 
 def test_mouse_scroll_moves_chat_viewport(tmp_path) -> None:
-    tui = AirgentTUI(services=_fake_services(tmp_path), agent_key="root_assistant", max_turns=8)
+    tui = AirgentTUI(services=_fake_services(tmp_path), agent_key="root_assistant")
     tui.chat_window.render_info = SimpleNamespace(window_height=10, window_width=80)
     tui._invalidate = lambda: None
     tui.state.messages = [("assistant", "\n".join(f"line {i}" for i in range(30)))]

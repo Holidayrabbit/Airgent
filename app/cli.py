@@ -26,7 +26,7 @@ app.add_typer(cron_app, name="cron")
 app.add_typer(skills_app, name="skills")
 
 
-async def _run_once(message: str, *, session_id: str | None, agent_key: str, max_turns: int | None) -> None:
+async def _run_once(message: str, *, session_id: str | None, agent_key: str) -> None:
     services = build_services()
     try:
         result = await services.runner.run(
@@ -34,7 +34,6 @@ async def _run_once(message: str, *, session_id: str | None, agent_key: str, max
                 input=message,
                 session_id=session_id,
                 agent_key=agent_key,
-                max_turns=max_turns,
             ),
             request_id="cli",
         )
@@ -65,12 +64,11 @@ def chat(
     message: Annotated[str | None, typer.Argument(help="Run a single prompt. Omit for interactive chat.")] = None,
     session_id: str | None = typer.Option(None, "--session", help="Reuse an existing session id."),
     agent_key: str = typer.Option(get_settings().default_agent_key, "--agent", help="Agent config key."),
-    max_turns: int | None = typer.Option(None, "--max-turns", min=1, max=50, help="Max SDK turns."),
 ) -> None:
     """Chat with Airgent in one-shot or interactive mode."""
 
     if message is not None:
-        asyncio.run(_run_once(message, session_id=session_id, agent_key=agent_key, max_turns=max_turns))
+        asyncio.run(_run_once(message, session_id=session_id, agent_key=agent_key))
         return
 
     services = build_services()
@@ -93,7 +91,6 @@ def chat(
                         input=prompt,
                         session_id=active_session_id,
                         agent_key=agent_key,
-                        max_turns=max_turns,
                     ),
                     request_id="cli",
                 )
@@ -107,12 +104,11 @@ def chat(
 @app.command()
 def tui(
     agent_key: str = typer.Option(get_settings().default_agent_key, "--agent", help="Agent config key."),
-    max_turns: int | None = typer.Option(None, "--max-turns", min=1, max=50, help="Max SDK turns."),
 ) -> None:
     """Open the full-screen terminal UI."""
 
     services = build_services()
-    asyncio.run(run_tui(services=services, agent_key=agent_key, max_turns=max_turns))
+    asyncio.run(run_tui(services=services, agent_key=agent_key))
 
 
 @sessions_app.command("list")

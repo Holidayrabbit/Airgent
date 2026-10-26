@@ -19,7 +19,6 @@ class SandboxSpec:
     provider: str
     argv_prefix: list[str] = field(default_factory=list)
     files: dict[Path, str] = field(default_factory=dict)
-    env_keys: tuple[str, ...] = ()
     summary: str = "sandbox disabled"
 
     @property

@@ -39,15 +39,12 @@ class Settings(BaseSettings):
         default="anthropic/claude-sonnet-4.5",
         validation_alias=AliasChoices("AIRGENT_MODEL", "AIRGENT_DEFAULT_MODEL"),
     )
-    default_max_turns: int = 12
 
     project_root: Path = Field(default_factory=Path.cwd)
     data_dir: Path = Field(default=Path.home() / ".airgent")
     db_path: Path | None = None
     skills_root: Path | None = None
     skills_user_root: Path | None = None
-    session_history_limit: int = 40
-    transcript_context_limit: int = 6
     memory_search_limit: int = 5
     session_list_limit: int = 50
 
@@ -55,9 +52,7 @@ class Settings(BaseSettings):
     pi_bin: str = Field(default="pi", validation_alias=AliasChoices("AIRGENT_PI_BIN", "PI_BIN"))
     pi_agent_dir: Path = Field(default=Path.home() / ".airgent" / "pi" / "agent")
     pi_session_dir: Path = Field(default=Path.home() / ".airgent" / "pi" / "sessions")
-    pi_idle_grace_seconds: float = 0.4
     pi_request_timeout_seconds: float = 30.0
-    pi_process_idle_timeout_seconds: float = 900.0
 
     # ------------------------------------------------------------------
     # Optional capabilities — every feature below defaults to OFF so the
@@ -82,7 +77,6 @@ class Settings(BaseSettings):
         default=False, validation_alias="AIRGENT_SKILLS_REGISTRY"
     )
     skills_registry_path: Path | None = None
-    skills_allow_all: bool = Field(default=True, validation_alias="AIRGENT_SKILLS_ALLOW_ALL")
 
     # MCP (Model Context Protocol): bridge external MCP servers into pi tools.
     mcp_enabled: bool = Field(default=False, validation_alias="AIRGENT_MCP")
@@ -126,10 +120,6 @@ class Settings(BaseSettings):
         if self.openai_api_mode.lower().startswith("responses"):
             return "openai-responses"
         return "openai-completions"
-
-    @property
-    def memory_root(self) -> Path:
-        return self.data_dir
 
     @property
     def skills_user_dir(self) -> Path:

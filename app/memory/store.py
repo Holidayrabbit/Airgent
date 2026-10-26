@@ -112,16 +112,6 @@ class LocalStore:
                     updated_at TEXT NOT NULL
                 );
 
-                CREATE TABLE IF NOT EXISTS session_items (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    session_id TEXT NOT NULL,
-                    item_json TEXT NOT NULL,
-                    created_at TEXT NOT NULL
-                );
-
-                CREATE INDEX IF NOT EXISTS idx_session_items_session_id
-                ON session_items(session_id, id);
-
                 CREATE TABLE IF NOT EXISTS transcripts (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     session_id TEXT NOT NULL,
@@ -310,55 +300,6 @@ class LocalStore:
                 (session_id, resolved_title, agent_key, now, now),
             )
 
-    def append_session_items(self, session_id: str, items: list[dict[str, Any]]) -> None:
-        if not items:
-            return
-        now = utcnow()
-        payloads = [
-            (
-                session_id,
-                json.dumps(item, ensure_ascii=True, default=str),
-                now,
-            )
-            for item in items
-        ]
-        with self._connect() as connection:
-            connection.executemany(
-                "INSERT INTO session_items(session_id, item_json, created_at) VALUES(?, ?, ?)",
-                payloads,
-            )
-
-    def get_session_items(self, session_id: str, limit: int | None = None) -> list[dict[str, Any]]:
-        query = "SELECT item_json FROM session_items WHERE session_id = ? ORDER BY id ASC"
-        params: tuple[Any, ...]
-        if limit is None:
-            params = (session_id,)
-        else:
-            query = (
-                "SELECT item_json FROM ("
-                "SELECT item_json, id FROM session_items WHERE session_id = ? ORDER BY id DESC LIMIT ?"
-                ") ORDER BY id ASC"
-            )
-            params = (session_id, limit)
-        with self._connect() as connection:
-            rows = connection.execute(query, params).fetchall()
-        return [json.loads(row["item_json"]) for row in rows]
-
-    def pop_session_item(self, session_id: str) -> dict[str, Any] | None:
-        with self._connect() as connection:
-            row = connection.execute(
-                "SELECT id, item_json FROM session_items WHERE session_id = ? ORDER BY id DESC LIMIT 1",
-                (session_id,),
-            ).fetchone()
-            if row is None:
-                return None
-            connection.execute("DELETE FROM session_items WHERE id = ?", (row["id"],))
-        return json.loads(row["item_json"])
-
-    def clear_session_items(self, session_id: str) -> None:
-        with self._connect() as connection:
-            connection.execute("DELETE FROM session_items WHERE session_id = ?", (session_id,))
-
     def append_message(
         self,
         session_id: str,
@@ -484,10 +425,9 @@ class LocalStore:
 
     def delete_session(self, session_id: str) -> None:
         with self._connect() as connection:
-            connection.execute("DELETE FROM session_items WHERE session_id = ?", (session_id,))
             connection.execute("DELETE FROM transcripts WHERE session_id = ?", (session_id,))
             connection.execute("DELETE FROM sessions WHERE session_id = ?", (session_id,))
-            connection.execute("DELETE FROM kernel_sessions WHERE airgent_session_id = ?", (session_id,))
+        self.delete_kernel_session(session_id)
 
     def add_memory(
         self,

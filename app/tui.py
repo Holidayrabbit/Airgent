@@ -120,7 +120,6 @@ class DisplayLine:
 class TUIState:
     services: AppServices
     agent_key: str
-    max_turns: int | None
     active_session_id: str | None = None
     messages: list[tuple[str, str]] = field(default_factory=list)
     execution_log: list[ExecutionEntry] = field(default_factory=list)
@@ -178,8 +177,8 @@ def _relative_time(raw: str) -> str:
 
 
 class AirgentTUI:
-    def __init__(self, *, services: AppServices, agent_key: str, max_turns: int | None) -> None:
-        self.state = TUIState(services=services, agent_key=agent_key, max_turns=max_turns)
+    def __init__(self, *, services: AppServices, agent_key: str) -> None:
+        self.state = TUIState(services=services, agent_key=agent_key)
         self.input_buffer = Buffer(multiline=True)
         self.input_buffer.on_text_changed += self._on_input_change
         self.banner = FormattedTextControl(self._render_banner)
@@ -537,27 +536,6 @@ class AirgentTUI:
             fragments.append(("", "\n"))
         return fragments
 
-    def _render_active_thread(self) -> StyleAndTextTuples:
-        fragments: StyleAndTextTuples = [
-            ("class:assistant.label", "Airgent\n"),
-            ("class:muted", "Working\n"),
-        ]
-        if not self.state.execution_log:
-            fragments.append(("class:muted", "· Starting the run\n\n"))
-            return fragments
-
-        for entry in self.state.execution_log[-6:]:
-            style = {
-                "tool": "class:event.tool",
-                "thinking": "class:event.thinking",
-                "message": "class:event.message",
-                "agent": "class:event.message",
-            }.get(entry.kind, "class:event.output")
-            summary = entry.summary if len(entry.summary) <= 96 else f"{entry.summary[:93]}..."
-            fragments.append((style, f"· {summary}\n"))
-        fragments.append(("", "\n"))
-        return fragments
-
     def _render_footer(self) -> StyleAndTextTuples:
         return [
             ("class:footer", f"{self.state.services.settings.project_root.name}"),
@@ -776,7 +754,6 @@ class AirgentTUI:
                     input=prompt,
                     session_id=self.state.active_session_id,
                     agent_key=self.state.agent_key,
-                    max_turns=self.state.max_turns,
                 ),
                 request_id="tui",
             ):
@@ -821,5 +798,5 @@ class AirgentTUI:
         await self.application.run_async()
 
 
-async def run_tui(*, services: AppServices, agent_key: str, max_turns: int | None) -> None:
-    await AirgentTUI(services=services, agent_key=agent_key, max_turns=max_turns).run()
+async def run_tui(*, services: AppServices, agent_key: str) -> None:
+    await AirgentTUI(services=services, agent_key=agent_key).run()

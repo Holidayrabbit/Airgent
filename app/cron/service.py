@@ -2,9 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import json
-import re
 from dataclasses import dataclass, field
-from datetime import UTC, datetime, timezone
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Any
 from uuid import uuid4
@@ -16,10 +15,6 @@ class ScheduleKind(str, Enum):
     CRON = "cron"
     ONCE = "once"
     INTERVAL = "interval"
-
-
-def utcnow() -> str:
-    return datetime.now(timezone.utc).isoformat()
 
 
 def parse_cron_next(cron_expr: str, *, base: datetime) -> datetime | None:
@@ -101,22 +96,6 @@ class JobRecord:
     metadata_json: str = "{}"
     id: str | None = None
 
-    def to_job(self, id: str) -> ScheduledJob:
-        return ScheduledJob(
-            id=id,
-            name=self.name,
-            agent_key=self.agent_key,
-            input=self.input,
-            schedule_kind=self.schedule_kind,
-            schedule_value=self.schedule_value,
-            enabled=self.enabled,
-            one_shot=self.one_shot,
-            last_run_at=self.last_run_at,
-            next_run_at=self.next_run_at,
-            created_at=self.created_at,
-            metadata_json=self.metadata_json,
-        )
-
 
 class CronService:
     """Lightweight cron scheduler backed by LocalStore SQLite.
@@ -137,12 +116,6 @@ class CronService:
         self._tasks: dict[str, asyncio.Task] = {}
         self._stopping = False
         self._lock = asyncio.Lock()
-
-    # ------------------------------------------------------------------
-    # Schema migration (adds scheduled_jobs table if missing)
-    # ------------------------------------------------------------------
-    def initialize(self) -> None:
-        self._store.initialize_cron()
 
     # ------------------------------------------------------------------
     # CRUD
@@ -305,7 +278,6 @@ class CronService:
                 input=job["input"],
                 session_id=session_id,
                 agent_key=job["agent_key"],
-                max_turns=None,
             )
             result = await self._runner.run(request, request_id=f"cron:{job_id}")
             # Log result to session
