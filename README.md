@@ -178,6 +178,10 @@ AIRGENT_PI_BIN=pi
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
+## Docs site
+
+The project homepage and documentation site live in [site/](site/) (static HTML/CSS/JS, no build step). Preview locally with `python3 -m http.server 10404 --directory site`. Pushes to `main` deploy it to GitHub Pages automatically via [.github/workflows/deploy-pages.yml](.github/workflows/deploy-pages.yml) (enable Pages with the "GitHub Actions" source in repo settings).
+
 ## license
 
 MIT

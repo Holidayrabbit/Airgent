@@ -1,0 +1,508 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Docs — Airgent</title>
+<meta name="description" content="Airgent documentation: quickstart, CLI, API, sandbox, skills, MCP, subagents, guardrails, hooks, memory system, and configuration reference.">
+<link rel="icon" type="image/png" href="assets/airgent.png">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+
+<nav class="nav">
+  <div class="nav-inner">
+    <a class="brand" href="index.html"><img src="assets/airgent.png" alt="">Airgent</a>
+    <div class="nav-spacer"></div>
+    <a class="nav-link" href="index.html">Home</a>
+    <a class="nav-link" href="https://github.com/Holidayrabbit/Airgent">GitHub</a>
+    <a class="nav-cta" href="docs.html#/quickstart">Get started</a>
+  </div>
+</nav>
+
+<div class="docs-shell">
+
+  <aside class="sidebar" id="sidebar">
+    <div class="group">
+      <div class="group-label">Start</div>
+      <div class="links">
+        <a href="#/overview" data-page="overview">Overview</a>
+        <a href="#/quickstart" data-page="quickstart">Quickstart</a>
+        <a href="#/cli" data-page="cli">CLI</a>
+        <a href="#/api" data-page="api">HTTP API</a>
+        <a href="#/sessions" data-page="sessions">Sessions &amp; cron</a>
+      </div>
+    </div>
+    <div class="group">
+      <div class="group-label">Capabilities</div>
+      <div class="links">
+        <a href="#/sandbox" data-page="sandbox">Sandbox</a>
+        <a href="#/skills" data-page="skills">Skills</a>
+        <a href="#/mcp" data-page="mcp">MCP servers</a>
+        <a href="#/subagents" data-page="subagents">Sub-agents</a>
+        <a href="#/guardrails" data-page="guardrails">Guardrails</a>
+        <a href="#/hooks" data-page="hooks">Hooks</a>
+        <a href="#/tracing" data-page="tracing">Tracing</a>
+      </div>
+    </div>
+    <div class="group">
+      <div class="group-label">Memory</div>
+      <div class="links">
+        <a href="#/memory" data-page="memory">Overview</a>
+        <a href="#/core-blocks" data-page="core-blocks">Core blocks</a>
+        <a href="#/auto-extract" data-page="auto-extract">Auto-extract</a>
+        <a href="#/decay" data-page="decay">Decay &amp; dedup</a>
+      </div>
+    </div>
+    <div class="group">
+      <div class="group-label">Reference</div>
+      <div class="links">
+        <a href="#/configuration" data-page="configuration">Configuration</a>
+        <a href="#/architecture" data-page="architecture">Architecture</a>
+        <a href="#/faq" data-page="faq">FAQ</a>
+      </div>
+    </div>
+  </aside>
+
+  <main class="docs-main">
+    <div class="crumb">docs · <b id="crumb-group">Start</b></div>
+
+    <!-- ============================== START ============================== -->
+    <section class="doc-page" data-page="overview" data-group="Start">
+      <div class="eyebrow">§ start / 01</div>
+      <h1>Overview</h1>
+      <p><strong>Airgent</strong> is a local-first personal agent runtime. One runtime is exposed through a CLI, a TUI, an HTTP API, and a WebUI.</p>
+      <p>The agent brain is the <strong>pi kernel</strong> (<code class="inline">@earendil-works/pi-coding-agent</code>). Airgent spawns one <code class="inline">pi --mode rpc</code> subprocess per session and speaks its JSONL protocol over stdin/stdout. pi owns model routing (15+ providers and OpenAI-compatible proxies), file &amp; shell tools, skill discovery, and session trees. Airgent keeps short-term transcripts and long-term memory in a local SQLite store, persists pi conversations locally, and never touches your own <code class="inline">~/.pi</code>.</p>
+
+      <h2>Design stance</h2>
+      <ul>
+        <li><strong>Local-first.</strong> Data lives in <code class="inline">~/.airgent/</code>; SQLite with WAL; no cloud service in the loop.</li>
+        <li><strong>Simple by default.</strong> With zero configuration Airgent is the thinnest useful wrapper around pi.</li>
+        <li><strong>Power when asked.</strong> Sandbox, skill registry, MCP, sub-agents, guardrails, hooks, memory upgrades, and tracing are independent opt-in flags.</li>
+      </ul>
+
+      <h2>What's in the box</h2>
+      <ul>
+        <li>Four surfaces over one kernel: <a href="#/cli" style="text-decoration:underline">CLI</a>, full-screen TUI, <a href="#/api" style="text-decoration:underline">HTTP API</a>, and a static WebUI.</li>
+        <li>A memory system with kinds, importance, decay, dedup, core blocks, and auto-extraction.</li>
+        <li>A cron scheduler that fires prompts through the same kernel.</li>
+        <li>An opt-in capability layer: <a href="#/sandbox" style="text-decoration:underline">sandbox</a>, <a href="#/skills" style="text-decoration:underline">skills</a>, <a href="#/mcp" style="text-decoration:underline">MCP</a>, <a href="#/subagents" style="text-decoration:underline">sub-agents</a>, <a href="#/guardrails" style="text-decoration:underline">guardrails</a>, <a href="#/hooks" style="text-decoration:underline">hooks</a>, <a href="#/tracing" style="text-decoration:underline">tracing</a>.</li>
+      </ul>
+      <div class="callout"><b>Check what's enabled</b> — run <code class="inline">airgent status</code> locally, or <code class="inline">GET /api/v1/features</code> over HTTP.</div>
+    </section>
+
+    <section class="doc-page" data-page="quickstart" data-group="Start">
+      <div class="eyebrow">§ start / 02</div>
+      <h1>Quickstart</h1>
+      <p>From clone to a running agent in three steps.</p>
+
+      <h2>1 · Install the pi kernel (once)</h2>
+      <pre class="block">curl -fsSL https://pi.dev/install.sh | sh
+<span class="c"># or: npm install -g --ignore-scripts @earendil-works/pi-coding-agent</span></pre>
+
+      <h2>2 · Configure</h2>
+      <pre class="block">uv sync
+cp .env.example .env
+<span class="c"># set OPENAI_API_KEY, optionally OPENAI_BASE_URL for a proxy</span></pre>
+
+      <h2>3 · Run</h2>
+      <pre class="block">uv run airgent serve --reload    <span class="c"># API + WebUI on http://127.0.0.1:10304</span>
+uv run airgent chat "plan my day"
+airgent tui</pre>
+
+      <h2>Global install</h2>
+      <p>No manual virtualenv needed for normal use:</p>
+      <pre class="block">sh scripts/install.sh
+airgent serve</pre>
+
+      <h2>First conversation</h2>
+      <pre class="block">curl -X POST http://127.0.0.1:10304/api/v1/agent/run \
+  -H 'Content-Type: application/json' \
+  -d '{"input": "Summarize what the Airgent project does"}'</pre>
+      <p>Open <code class="inline">http://127.0.0.1:10304</code> for the WebUI. Sessions appear in <code class="inline">airgent sessions list</code>; memory in <code class="inline">airgent memory list</code>.</p>
+    </section>
+
+    <section class="doc-page" data-page="cli" data-group="Start">
+      <div class="eyebrow">§ start / 03</div>
+      <h1>CLI</h1>
+      <p>Airgent is driven by a Typer CLI. Every command works without the server running.</p>
+
+      <h2>Chat</h2>
+      <pre class="block">airgent chat "give me today's plan"   <span class="c"># one-shot</span>
+airgent chat                          <span class="c"># interactive; /exit, /new</span>
+airgent tui                           <span class="c"># full-screen TUI</span></pre>
+      <p>Inside the TUI: <code class="inline">Enter</code> sends, <code class="inline">/</code> opens the command palette, <code class="inline">/resume</code> restores a session, <code class="inline">Ctrl-O</code> toggles execution detail.</p>
+
+      <h2>Sessions</h2>
+      <pre class="block">airgent sessions list
+airgent sessions show &lt;session-id&gt;
+airgent sessions delete &lt;session-id&gt;</pre>
+
+      <h2>Memory</h2>
+      <pre class="block">airgent memory list
+airgent memory search "uv python"
+airgent memory add "Prefers uv" --tags python,tooling --kind preference --importance 0.9
+airgent memory blocks
+airgent memory set-block persona "Concise and blunt"
+airgent memory delete-block persona</pre>
+
+      <h2>Cron</h2>
+      <pre class="block">airgent cron create nightly-plan --input "Plan tomorrow" --schedule-kind cron --schedule-value "0 21 * * *"
+airgent cron list
+airgent cron trigger &lt;job-id&gt;
+airgent cron pause / resume / delete &lt;job-id&gt;</pre>
+
+      <h2>Capabilities</h2>
+      <pre class="block">airgent status                <span class="c"># config + enabled features</span>
+airgent sandbox               <span class="c"># effective sandbox provider</span>
+airgent skills list
+airgent skills enable|disable &lt;name&gt;
+airgent skills mode deny_all
+airgent skills add-dir ~/more-skills</pre>
+    </section>
+
+    <section class="doc-page" data-page="api" data-group="Start">
+      <div class="eyebrow">§ start / 04</div>
+      <h1>HTTP API</h1>
+      <p>Served by the same process as the WebUI, under <code class="inline">/api/v1</code>.</p>
+
+      <h2>Agent</h2>
+      <pre class="block">POST /api/v1/agent/run      <span class="c"># blocking run</span>
+POST /api/v1/agent/stream   <span class="c"># NDJSON progress stream</span>
+GET  /api/v1/agent/available</pre>
+      <pre class="block">curl -X POST http://127.0.0.1:10304/api/v1/agent/stream \
+  -H 'Content-Type: application/json' \
+  -d '{"input": "Refactor the README", "session_id": null}'</pre>
+      <p>The stream emits progress events — <code class="inline">status</code>, <code class="inline">thinking</code>, <code class="inline">tool</code>, <code class="inline">tool_output</code>, <code class="inline">message</code>, <code class="inline">completed</code>, <code class="inline">error</code> — one JSON object per line.</p>
+
+      <h2>Data</h2>
+      <table class="tbl">
+        <tr><th>Endpoint</th><th>Purpose</th></tr>
+        <tr><td><code>GET/POST /memories</code></td><td>List / create memories (supports <code>kind</code>, <code>importance</code>)</td></tr>
+        <tr><td><code>GET /memories/search</code></td><td>Ranked keyword search</td></tr>
+        <tr><td><code>GET/PUT/DELETE /memories/blocks</code></td><td>Core memory blocks</td></tr>
+        <tr><td><code>GET /sessions</code> · <code>GET /sessions/{id}</code></td><td>Session list and transcript</td></tr>
+        <tr><td><code>GET/POST /cron</code> + pause/resume/trigger</td><td>Scheduled jobs</td></tr>
+        <tr><td><code>GET /skills</code> · <code>POST /skills/{name}/enable|disable</code></td><td>Skill registry</td></tr>
+        <tr><td><code>GET /features</code></td><td>Enabled capability report</td></tr>
+      </table>
+    </section>
+
+    <section class="doc-page" data-page="sessions" data-group="Start">
+      <div class="eyebrow">§ start / 05</div>
+      <h1>Sessions &amp; cron</h1>
+
+      <h2>Sessions</h2>
+      <p>Each Airgent session maps to one pi session file under <code class="inline">~/.airgent/pi/sessions</code> (the binding is stored in SQLite, table <code class="inline">kernel_sessions</code>). Later runs resume the same pi conversation, preserving tool history and compaction. Airgent additionally mirrors user/assistant transcripts into its own database for listing and search.</p>
+      <p>Pass <code class="inline">session_id</code> in an API request (or <code class="inline">--session</code> on the CLI) to continue a conversation; omit it to start a new one and the id comes back in the response.</p>
+
+      <h2>Cron</h2>
+      <p>Scheduled prompts run through the same runner and land in the transcript as <code class="inline">[CRON &lt;name&gt;]</code> system entries.</p>
+      <ul>
+        <li><strong>schedule kinds:</strong> <code class="inline">cron</code> (5-field expression), <code class="inline">interval</code> (seconds), <code class="inline">once</code> (one-shot).</li>
+        <li>A background loop polls every 30s; <code class="inline">airgent cron trigger</code> fires immediately.</li>
+        <li>One-shots disable themselves after running.</li>
+      </ul>
+    </section>
+
+    <!-- ========================= CAPABILITIES ========================= -->
+    <section class="doc-page" data-page="sandbox" data-group="Capabilities">
+      <div class="eyebrow">§ capabilities / 01</div>
+      <h1>Sandbox</h1>
+      <p>Run the pi kernel subprocess inside a sandbox so every tool the agent executes — bash, file edits, extensions — inherits the confinement. Off by default.</p>
+      <pre class="block">export AIRGENT_SANDBOX=seatbelt   <span class="c"># macOS</span>
+<span class="c"># or</span>
+export AIRGENT_SANDBOX=docker     <span class="c"># any host with Docker</span>
+airgent sandbox                   <span class="c"># print the effective provider</span></pre>
+
+      <h2>seatbelt (macOS, recommended)</h2>
+      <p>Airgent renders a <code class="inline">sandbox-exec</code> profile to <code class="inline">~/.airgent/pi/agent/sandbox.sb</code> and launches pi behind <code class="inline">/usr/bin/sandbox-exec -f</code>.</p>
+      <ul>
+        <li>Deny-by-default; system paths remain readable.</li>
+        <li>Writes confined to the workspace, <code class="inline">~/.airgent</code>, <code class="inline">/private/tmp</code>, and <code class="inline">/private/var/folders</code>.</li>
+        <li>Network denied unless <code class="inline">AIRGENT_SANDBOX_NETWORK=1</code>.</li>
+      </ul>
+
+      <h2>docker (experimental)</h2>
+      <p>The kernel runs as <code class="inline">docker run --rm -i</code> with the workspace and <code class="inline">~/.airgent</code> bind-mounted at their host paths, <code class="inline">--network none</code> by default, plus a whitelist of environment variables.</p>
+      <pre class="block">FROM node:20-bookworm-slim
+RUN apt-get update &amp;&amp; apt-get install -y --no-install-recommends python3 \
+    &amp;&amp; rm -rf /var/lib/apt/lists/*
+RUN npm install -g --ignore-scripts @earendil-works/pi-coding-agent</pre>
+      <div class="callout"><b>Image requirements</b> — Node.js, a global <code class="inline">pi</code> install, and Python 3 (for the memory extension CLI). The container also needs the Airgent package importable; mount or bake the repo in.</div>
+    </section>
+
+    <section class="doc-page" data-page="skills" data-group="Capabilities">
+      <div class="eyebrow">§ capabilities / 02</div>
+      <h1>Skills</h1>
+      <p>pi discovers skills natively: <code class="inline">.agents/skills/</code> in the workspace and <code class="inline">~/.agents/skills/</code> for user skills, scanned recursively for <code class="inline">SKILL.md</code> (the <a href="https://agentskills.io" style="text-decoration:underline">Agent Skills</a> format). Only name and description enter the system prompt; the body is read on demand.</p>
+
+      <h2>Skill registry (opt-in)</h2>
+      <p>Set <code class="inline">AIRGENT_SKILLS_REGISTRY=1</code> to add per-skill kill switches on top of native discovery:</p>
+      <pre class="block">airgent skills list
+airgent skills disable brave-search
+airgent skills enable brave-search
+airgent skills mode deny_all      <span class="c"># default-deny; enable only what you list</span>
+airgent skills add-dir ~/more-skills</pre>
+      <ul>
+        <li>State lives in <code class="inline">~/.airgent/skills.json</code> (<code class="inline">mode</code> / <code class="inline">enabled</code> / <code class="inline">disabled</code> / <code class="inline">extra_dirs</code>).</li>
+        <li>When the registry is enabled and something is actually filtered, Airgent writes a <code class="inline">skills</code> whitelist into the isolated agent dir's <code class="inline">settings.json</code> — your own <code class="inline">~/.pi</code> is never touched.</li>
+        <li>Same control over HTTP: <code class="inline">GET /api/v1/skills</code>, <code class="inline">POST /api/v1/skills/{name}/enable|disable</code>.</li>
+      </ul>
+      <div class="callout"><b>Not a security boundary</b> — the registry controls which skills load. Use the sandbox and guardrails for hard isolation.</div>
+    </section>
+
+    <section class="doc-page" data-page="mcp" data-group="Capabilities">
+      <div class="eyebrow">§ capabilities / 03</div>
+      <h1>MCP servers</h1>
+      <p>pi intentionally ships without MCP; Airgent adds it. With <code class="inline">AIRGENT_MCP=1</code>, the <code class="inline">airgent-mcp</code> extension reads a Claude-Desktop-compatible config, spawns each stdio server, performs the JSON-RPC handshake, and registers every remote tool as a pi tool named <code class="inline">mcp__&lt;server&gt;__&lt;tool&gt;</code>.</p>
+
+      <h2>Config</h2>
+      <p>Defaults to <code class="inline">~/.airgent/mcp.json</code> (override with <code class="inline">AIRGENT_MCP_CONFIG</code>). Airgent creates an empty template on first run:</p>
+      <pre class="block">{
+  "mcpServers": {
+    "filesystem": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"]
+    }
+  }
+}</pre>
+
+      <h2>Notes</h2>
+      <ul>
+        <li>stdio servers only (command + args + optional env).</li>
+        <li>Tool schemas come from the server's <code class="inline">tools/list</code>; calls proxy through <code class="inline">tools/call</code>.</li>
+        <li>Startup timeout 15s per server; a failing server surfaces as an extension error, not a crash.</li>
+      </ul>
+    </section>
+
+    <section class="doc-page" data-page="subagents" data-group="Capabilities">
+      <div class="eyebrow">§ capabilities / 04</div>
+      <h1>Sub-agents</h1>
+      <p>With <code class="inline">AIRGENT_SUBAGENTS=1</code> the kernel gains a <code class="inline">spawn_subagent</code> tool: the root agent delegates a self-contained subtask to a fresh headless <code class="inline">pi --mode rpc --no-session</code> process and receives its final answer.</p>
+      <pre class="block">spawn_subagent(
+  task: "Audit tests/ for flaky patterns and list them",
+  timeout_seconds: 300   <span class="c"># optional, 10–900</span>
+)</pre>
+      <h2>Behavior</h2>
+      <ul>
+        <li>Sub-agents see <strong>only</strong> the <code class="inline">task</code> text — put all needed context into it.</li>
+        <li>Depth-capped: children carry <code class="inline">AIRGENT_SUBAGENT_DEPTH</code>; the tool refuses beyond <code class="inline">AIRGENT_SUBAGENTS_MAX_DEPTH</code> (1–3), so delegation trees terminate.</li>
+        <li>Model defaults to your default model; override with <code class="inline">AIRGENT_SUBAGENTS_MODEL</code>.</li>
+      </ul>
+      <div class="callout"><b>Good fits</b> — research sweeps, bulk refactors, well-scoped parallelizable work. Not for stateful edits that need this conversation's context.</div>
+    </section>
+
+    <section class="doc-page" data-page="guardrails" data-group="Capabilities">
+      <div class="eyebrow">§ capabilities / 05</div>
+      <h1>Guardrails</h1>
+      <p>With <code class="inline">AIRGENT_GUARDRAILS=1</code>, a policy file decides which tool calls are blocked before execution — enforced inside the kernel via the <code class="inline">tool_call</code> hook.</p>
+      <p>Config defaults to <code class="inline">~/.airgent/guardrails.json</code> (override with <code class="inline">AIRGENT_GUARDRAILS_CONFIG</code>). Airgent writes a sensible default on first run:</p>
+      <pre class="block">{
+  "denied_tools": [],
+  "denied_commands": ["rm\\s+-rf\\s+/", "sudo\\s"],
+  "denied_paths": ["(^|/)\\.env$", "secrets/"],
+  "max_bash_timeout": 300,
+  "message": "Blocked by Airgent guardrails policy"
+}</pre>
+      <ul>
+        <li><code class="inline">denied_commands</code> — regexes matched against bash commands.</li>
+        <li><code class="inline">denied_paths</code> — regexes matched against read/write/edit paths.</li>
+        <li><code class="inline">denied_tools</code> — tool names blocked outright.</li>
+        <li><code class="inline">max_bash_timeout</code> — seconds; 0 disables the check.</li>
+      </ul>
+      <p>Blocked calls return the policy message to the model as the tool error, so it can adapt instead of crashing.</p>
+    </section>
+
+    <section class="doc-page" data-page="hooks" data-group="Capabilities">
+      <div class="eyebrow">§ capabilities / 06</div>
+      <h1>Hooks</h1>
+      <p>Lifecycle hooks run external commands around agent turns. Off by default; config at <code class="inline">~/.airgent/hooks.json</code> (override with <code class="inline">AIRGENT_HOOKS_CONFIG</code>).</p>
+      <pre class="block">{
+  "hooks": {
+    "before_run": [{ "command": "/path/to/check.sh", "timeout": 10 }],
+    "after_run":  [{ "command": "/path/to/notify.sh", "timeout": 10 }]
+  }
+}</pre>
+      <h2>Conventions</h2>
+      <ul>
+        <li>Each hook receives the turn payload as JSON on <strong>stdin</strong> — <code class="inline">{input, session_id, agent_key}</code> before, plus <code class="inline">output</code> after.</li>
+        <li>exit <code class="inline">0</code> — allow / success.</li>
+        <li>exit <code class="inline">2</code> — (<code class="inline">before_run</code> only) <strong>veto the run</strong>; stdout becomes the reason.</li>
+        <li>Anything else — failure is logged but does not block.</li>
+      </ul>
+      <pre class="block"><span class="c">#!/bin/sh</span>
+payload=$(cat)
+case "$payload" in *'"rm -rf"'*) echo "destructive input"; exit 2;; esac
+exit 0</pre>
+    </section>
+
+    <section class="doc-page" data-page="tracing" data-group="Capabilities">
+      <div class="eyebrow">§ capabilities / 07</div>
+      <h1>Tracing</h1>
+      <p>With <code class="inline">AIRGENT_TRACING=1</code>, every turn records trace events into SQLite (table <code class="inline">trace_events</code>):</p>
+      <ul>
+        <li><code class="inline">turn_start</code> — input, session, agent key</li>
+        <li><code class="inline">turn_end</code> — output size</li>
+        <li><code class="inline">turn_error</code> — kernel error text</li>
+      </ul>
+      <p>Read them from the store:</p>
+      <pre class="block">uv run python -c "
+from app.memory.store import LocalStore
+from app.core.config import get_settings
+store = LocalStore(get_settings().db_path)
+for e in store.list_trace_events(limit=20):
+    print(e['created_at'], e['kind'], e['session_id'])
+"</pre>
+    </section>
+
+    <!-- ============================ MEMORY ============================ -->
+    <section class="doc-page" data-page="memory" data-group="Memory">
+      <div class="eyebrow">§ memory / 01</div>
+      <h1>Memory system</h1>
+      <p>Long-term memory lives in the same SQLite database as transcripts. Two model-facing tools are always available to the agent (via the bundled <code class="inline">airgent-memory</code> extension): <code class="inline">search_memory</code> and <code class="inline">remember_note</code>. Relevant hits are also injected into prompts automatically as an <code class="inline">&lt;airgent-context&gt;</code> block.</p>
+
+      <h2>Records</h2>
+      <p>Every memory carries:</p>
+      <table class="tbl">
+        <tr><th>Field</th><th>Meaning</th></tr>
+        <tr><td><code>kind</code></td><td><code>fact | preference | profile | project | event</code></td></tr>
+        <tr><td><code>importance</code></td><td>0.0–1.0 weight used by ranked search</td></tr>
+        <tr><td><code>tags</code></td><td>Free-form, lower-cased</td></tr>
+        <tr><td><code>access_count</code> / <code>last_accessed_at</code></td><td>Retrieval bookkeeping (feeds decay)</td></tr>
+      </table>
+      <pre class="block">airgent memory add "Ships on macOS arm64" --kind fact --importance 0.7</pre>
+
+      <h2>Search</h2>
+      <p>Keyword hits are ranked by <code class="inline">hits × (0.5 + importance)</code>, optionally multiplied by a decay factor (see <a href="#/decay" style="text-decoration:underline">Decay &amp; dedup</a>). Retrieval touches the record so hot memories stay hot.</p>
+
+      <h2>Upgrade flags</h2>
+      <table class="tbl">
+        <tr><th>Flag</th><th>Effect</th></tr>
+        <tr><td><code>AIRGENT_MEMORY_DEDUP=1</code></td><td>Near-duplicates are merged (token Jaccard ≥ 0.8)</td></tr>
+        <tr><td><code>AIRGENT_MEMORY_DECAY_DAYS=N</code></td><td>Importance halves every N days without access</td></tr>
+        <tr><td><code>AIRGENT_MEMORY_CORE_BLOCKS=1</code></td><td>Always-in-context blocks</td></tr>
+        <tr><td><code>AIRGENT_MEMORY_AUTO_EXTRACT=1</code></td><td>Mine durable facts from user messages</td></tr>
+      </table>
+    </section>
+
+    <section class="doc-page" data-page="core-blocks" data-group="Memory">
+      <div class="eyebrow">§ memory / 02</div>
+      <h1>Core blocks</h1>
+      <p>Core memory blocks (Letta-style) are small named notes that are <strong>always in context</strong>. With <code class="inline">AIRGENT_MEMORY_CORE_BLOCKS=1</code>, every block is injected at the top of each prompt as <code class="inline">&lt;core-memory&gt;&lt;key&gt;…&lt;/key&gt;…&lt;/core-memory&gt;</code>.</p>
+      <pre class="block">airgent memory set-block persona "Concise, blunt, code-first"
+airgent memory set-block goals "Ship the Airgent v0.2 docs"
+airgent memory blocks
+airgent memory delete-block goals</pre>
+      <p>HTTP equivalents: <code class="inline">GET/PUT/DELETE /api/v1/memories/blocks</code>.</p>
+      <div class="callout"><b>Keep them small</b> — blocks are paid on every turn. Persona, current goals, and hard constraints are the classic uses.</div>
+    </section>
+
+    <section class="doc-page" data-page="auto-extract" data-group="Memory">
+      <div class="eyebrow">§ memory / 03</div>
+      <h1>Auto-extract</h1>
+      <p>With <code class="inline">AIRGENT_MEMORY_AUTO_EXTRACT=1</code>, every user message is mined for durable facts before the run — mem0-style extraction with a deterministic multilingual pattern matcher, so it needs no extra model calls.</p>
+      <table class="tbl">
+        <tr><th>Pattern</th><th>Kind</th><th>Importance</th></tr>
+        <tr><td>"记住…", "remember that…"</td><td><code>fact</code></td><td>0.8</td></tr>
+        <tr><td>"我叫…", "my name is…"</td><td><code>profile</code></td><td>0.9</td></tr>
+        <tr><td>"我喜欢…", "I prefer…"</td><td><code>preference</code></td><td>0.7</td></tr>
+        <tr><td>"我正在开发…", "I'm working on…"</td><td><code>project</code></td><td>0.6</td></tr>
+      </table>
+      <p>Extracted facts are stored with the session as source and take part in ranked search immediately. At most five per message; duplicates are filtered within the message and (with dedup on) across the store.</p>
+    </section>
+
+    <section class="doc-page" data-page="decay" data-group="Memory">
+      <div class="eyebrow">§ memory / 04</div>
+      <h1>Decay &amp; dedup</h1>
+
+      <h2>Time decay (Zep-flavored)</h2>
+      <p>Set <code class="inline">AIRGENT_MEMORY_DECAY_DAYS=N</code> and a memory's effective weight halves for every N days since it was last accessed (<code class="inline">last_accessed_at</code>, falling back to <code class="inline">updated_at</code> / <code class="inline">created_at</code>):</p>
+      <pre class="block">score = hits × (0.5 + importance) × 0.5 ^ (idle_days / N)</pre>
+      <p>Searches touch what they return, so actively used memories never decay away. <code class="inline">0</code> (default) disables decay entirely.</p>
+
+      <h2>Dedup</h2>
+      <p>With <code class="inline">AIRGENT_MEMORY_DEDUP=1</code>, <code class="inline">add_memory</code> checks the store for an exact or near-duplicate (token Jaccard ≥ 0.8). On a hit it merges tags, bumps importance to the max, and refreshes the existing record instead of inserting a second copy — the memory id you get back is the original's.</p>
+    </section>
+
+    <!-- ========================== REFERENCE ========================== -->
+    <section class="doc-page" data-page="configuration" data-group="Reference">
+      <div class="eyebrow">§ reference / 01</div>
+      <h1>Configuration</h1>
+      <p>Airgent reads <code class="inline">.env</code> automatically and plain environment variables otherwise. Core keys:</p>
+      <table class="tbl">
+        <tr><th>Variable</th><th>Default</th><th>Purpose</th></tr>
+        <tr><td><code>OPENAI_API_KEY</code></td><td>—</td><td>Required (proxy credential)</td></tr>
+        <tr><td><code>OPENAI_BASE_URL</code></td><td>unset</td><td>Route models through an OpenAI-compatible proxy</td></tr>
+        <tr><td><code>OPENAI_API_MODE</code></td><td><code>chat_completions</code></td><td>or <code>responses</code></td></tr>
+        <tr><td><code>AIRGENT_MODEL</code></td><td><code>anthropic/claude-sonnet-4.5</code></td><td>Default model id</td></tr>
+        <tr><td><code>AIRGENT_PI_BIN</code></td><td><code>pi</code></td><td>Kernel binary</td></tr>
+        <tr><td><code>AIRGENT_DATA_DIR</code></td><td><code>~/.airgent</code></td><td>Data root</td></tr>
+      </table>
+
+      <h2>Capability flags (all default off)</h2>
+      <table class="tbl">
+        <tr><th>Flag</th><th>Values</th></tr>
+        <tr><td><code>AIRGENT_SANDBOX</code></td><td><code>none | seatbelt | docker</code> (+<code>_NETWORK</code>, <code>_IMAGE</code>)</td></tr>
+        <tr><td><code>AIRGENT_SKILLS_REGISTRY</code></td><td><code>1</code> (+<code>AIRGENT_SKILLS_ALLOW_ALL</code>)</td></tr>
+        <tr><td><code>AIRGENT_MCP</code></td><td><code>1</code> (+<code>AIRGENT_MCP_CONFIG</code>)</td></tr>
+        <tr><td><code>AIRGENT_SUBAGENTS</code></td><td><code>1</code> (+<code>_MAX_DEPTH</code>, <code>_MODEL</code>)</td></tr>
+        <tr><td><code>AIRGENT_GUARDRAILS</code></td><td><code>1</code> (+<code>_CONFIG</code>)</td></tr>
+        <tr><td><code>AIRGENT_HOOKS</code></td><td><code>1</code> (+<code>_CONFIG</code>)</td></tr>
+        <tr><td><code>AIRGENT_MEMORY_DEDUP</code> / <code>_DECAY_DAYS</code> / <code>_CORE_BLOCKS</code> / <code>_AUTO_EXTRACT</code></td><td><code>1</code> / <code>N</code> / <code>1</code> / <code>1</code></td></tr>
+        <tr><td><code>AIRGENT_TRACING</code></td><td><code>1</code></td></tr>
+      </table>
+      <p>Inspect the effective state with <code class="inline">airgent status</code> or <code class="inline">GET /api/v1/features</code>.</p>
+    </section>
+
+    <section class="doc-page" data-page="architecture" data-group="Reference">
+      <div class="eyebrow">§ reference / 02</div>
+      <h1>Architecture</h1>
+      <p><strong>Kernel layer</strong> (<code class="inline">app/kernel/</code>) — one <code class="inline">pi --mode rpc</code> subprocess per session; <code class="inline">process.py</code> owns the JSONL protocol, <code class="inline">events.py</code> normalizes pi records into typed events, <code class="inline">manager.py</code> pools processes and resumes sessions, and <code class="inline">setup.py</code> materializes the isolated agent dir (<code class="inline">~/.airgent/pi/agent</code>: models.json, settings.json skills overlay, APPEND_SYSTEM.md, extensions) plus the sandbox launch spec.</p>
+      <p><strong>Capability layer</strong> — <code class="inline">app/sandbox/</code> (seatbelt/docker prefixes), <code class="inline">app/skills/</code> (registry → pi settings.json whitelist), and three opt-in kernel extensions in <code class="inline">pi/</code>: <code class="inline">airgent-guardrails.ts</code> (tool_call policy), <code class="inline">airgent-subagent.ts</code> (delegation), <code class="inline">airgent-mcp.ts</code> (MCP bridge). Lifecycle hooks live in <code class="inline">app/hooks/</code>.</p>
+      <p><strong>Service layer</strong> — <code class="inline">app/agents/runner.py</code> translates kernel events into progress events, persists transcripts, injects core blocks and memory hits, runs hooks, extracts memories, and traces turns. <code class="inline">app/memory/store.py</code> is the single SQLite store (sessions, transcripts, memories, blocks, cron, traces, kernel bindings).</p>
+      <p><strong>Surfaces</strong> — FastAPI (<code class="inline">app/api/</code>), Typer CLI, prompt-toolkit TUI, static WebUI — all over the same <code class="inline">AgentRunnerService</code>.</p>
+      <p>Full module map lives in the repo's <code class="inline">docs/ARCHITECTURE.md</code> and <code class="inline">AGENTS.md</code>.</p>
+    </section>
+
+    <section class="doc-page" data-page="faq" data-group="Reference">
+      <div class="eyebrow">§ reference / 03</div>
+      <h1>FAQ</h1>
+
+      <h3>Does Airgent touch my ~/.pi?</h3>
+      <p>No. pi state is isolated under <code class="inline">~/.airgent/pi/</code>; your own configuration is never read or written.</p>
+
+      <h3>What runs by default?</h3>
+      <p>The plain pi wrapper: built-in tools, native skill discovery, memory tools. Every capability flag defaults to off — verify with <code class="inline">airgent status</code>.</p>
+
+      <h3>Do I need the server for the CLI?</h3>
+      <p>No. CLI commands spawn the kernel directly. The server only adds the HTTP API and WebUI.</p>
+
+      <h3>Is the seatbelt sandbox enough?</h3>
+      <p>It confines writes and (by default) network for the kernel process tree. For stronger isolation use the Docker provider, and review what you expose via mounts.</p>
+
+      <h3>Where is my data?</h3>
+      <p>Everything in <code class="inline">~/.airgent/</code>: <code class="inline">airgent.db</code> (SQLite, WAL), pi sessions under <code class="inline">pi/sessions</code>, policy/config files at the data-dir root. Delete the directory to reset.</p>
+
+      <h3>How do tests run?</h3>
+      <p><code class="inline">uv run pytest</code> — 56 tests, no external services needed.</p>
+    </section>
+
+    <div class="pager" id="pager"></div>
+  </main>
+</div>
+
+<footer>
+  <div class="container footer-inner">
+    <div class="left"><img src="assets/airgent.png" alt="">Airgent — local-first personal agent runtime</div>
+    <div class="right">
+      <a href="index.html">home</a>
+      <a href="https://github.com/Holidayrabbit/Airgent">github</a>
+      <span>MIT</span>
+    </div>
+  </div>
+</footer>
+
+<script src="assets/main.js"></script>
+</body>
+</html>

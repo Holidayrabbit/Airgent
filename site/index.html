@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Airgent — a local-first personal agent runtime</title>
+<meta name="description" content="Airgent is a local-first personal agent runtime on the pi kernel: CLI, TUI, API, and WebUI over one local runtime, with opt-in sandbox, skills, MCP, subagents, guardrails, hooks, and an upgraded memory system.">
+<link rel="icon" type="image/png" href="assets/airgent.png">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+
+<nav class="nav">
+  <div class="nav-inner">
+    <a class="brand" href="index.html"><img src="assets/airgent.png" alt="">Airgent</a>
+    <div class="nav-spacer"></div>
+    <a class="nav-link" href="docs.html">Docs</a>
+    <a class="nav-link" href="https://github.com/Holidayrabbit/Airgent">GitHub</a>
+    <a class="nav-cta" href="docs.html#/quickstart">Get started</a>
+  </div>
+</nav>
+
+<header class="hero container">
+  <div class="hero-kicker"><span class="dot"></span>local-first · powered by the pi kernel</div>
+  <h1>One agent runtime,<br><span class="dim">every surface you use.</span></h1>
+  <p class="sub">
+    Airgent is a local-first personal agent base system. The pi agent kernel does the
+    thinking — model routing, file &amp; shell tools, compaction — while Airgent exposes it
+    through a CLI, a TUI, an HTTP API, and a WebUI, with transcripts and long-term memory
+    in a local SQLite store.
+  </p>
+
+  <div class="install">
+    <div style="flex:1">
+      <div class="install-tabs" role="tablist">
+        <button class="active" data-tab="uv">uv</button>
+        <button data-tab="script">install.sh</button>
+        <button data-tab="pi">pi kernel</button>
+      </div>
+      <div class="install-cmd">
+        <code><span class="dollar">$</span> <span id="install-text">curl -fsSL https://pi.dev/install.sh | sh &amp;&amp; uv sync</span></code>
+        <button class="copy-btn" data-copy-target="install-text">copy</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="hero-meta">
+    Fully local by default · your <code>~/.pi</code> is never touched · <a href="docs.html#/quickstart">read the quickstart</a>
+  </div>
+</header>
+
+<div class="eco" aria-hidden="true">
+  <div class="eco-track" id="eco-track">
+    <span class="chip">pi kernel · RPC subprocess</span>
+    <span class="chip">Anthropic</span>
+    <span class="chip">OpenAI</span>
+    <span class="chip">Google</span>
+    <span class="chip">OpenAI-compatible proxies</span>
+    <span class="chip">Agent Skills (agentskills.io)</span>
+    <span class="chip">MCP (stdio servers)</span>
+    <span class="chip">SQLite · WAL</span>
+    <span class="chip">macOS Seatbelt</span>
+    <span class="chip">Docker</span>
+    <span class="chip">FastAPI</span>
+    <span class="chip">Typer CLI</span>
+    <span class="chip">prompt-toolkit TUI</span>
+  </div>
+</div>
+
+<section class="section container">
+  <div class="section-head"><span class="section-num">§ 01</span><h2>Capabilities</h2></div>
+  <p class="section-sub">
+    Modern-agent machinery, one flag away. Everything below is opt-in — flip an
+    environment variable when you need it, and off again when you don't.
+  </p>
+  <div class="grid">
+    <div class="card">
+      <div class="icon">◍</div>
+      <h3>Sandbox</h3>
+      <p>Run the kernel inside a macOS Seatbelt profile or a Docker container. Writes confined to the workspace; network denied by default.</p>
+      <span class="flag">AIRGENT_SANDBOX=seatbelt|docker</span>
+    </div>
+    <div class="card">
+      <div class="icon">✦</div>
+      <h3>Skill registry</h3>
+      <p>Per-skill enable/disable on top of pi's native .agents/skills discovery, with a default-deny mode and extra skill dirs.</p>
+      <span class="flag">AIRGENT_SKILLS_REGISTRY=1</span>
+    </div>
+    <div class="card">
+      <div class="icon">⇄</div>
+      <h3>MCP servers</h3>
+      <p>Bridge external MCP servers (Claude-Desktop-compatible config) into the kernel. Each server's tools appear as mcp__server__tool.</p>
+      <span class="flag">AIRGENT_MCP=1</span>
+    </div>
+    <div class="card">
+      <div class="icon">⑂</div>
+      <h3>Sub-agents</h3>
+      <p>Delegate self-contained subtasks to fresh headless agents and collect their final answer. Depth-capped so trees terminate.</p>
+      <span class="flag">AIRGENT_SUBAGENTS=1</span>
+    </div>
+    <div class="card">
+      <div class="icon">⛌</div>
+      <h3>Guardrails</h3>
+      <p>Policy-driven tool-call filtering: denied commands, denied paths, denied tools, bash timeout caps — enforced inside the kernel.</p>
+      <span class="flag">AIRGENT_GUARDRAILS=1</span>
+    </div>
+    <div class="card">
+      <div class="icon">⟳</div>
+      <h3>Lifecycle hooks</h3>
+      <p>before_run / after_run shell hooks fed JSON on stdin. A before_run hook exiting 2 vetoes the turn.</p>
+      <span class="flag">AIRGENT_HOOKS=1</span>
+    </div>
+    <div class="card">
+      <div class="icon">◉</div>
+      <h3>Memory system</h3>
+      <p>Kinds &amp; importance, time decay on access, near-duplicate merging, Letta-style core blocks, and automatic fact extraction.</p>
+      <span class="flag">AIRGENT_MEMORY_*</span>
+    </div>
+    <div class="card">
+      <div class="icon">⌗</div>
+      <h3>Tracing</h3>
+      <p>Observability for every turn: run starts, ends, and errors persisted as trace events you can query.</p>
+      <span class="flag">AIRGENT_TRACING=1</span>
+    </div>
+    <div class="card">
+      <div class="icon">◐</div>
+      <h3>Cron</h3>
+      <p>Schedule prompts on cron expressions, intervals, or one-shots. Jobs run through the same kernel and land in the transcript.</p>
+      <span class="flag">airgent cron create</span>
+    </div>
+  </div>
+
+  <div class="optin">
+    <div>
+      <h3>Simple by default</h3>
+      <p>With no configuration, Airgent is the thinnest useful wrapper around pi: native skill discovery, built-in file &amp; shell tools, and the bundled memory tools. No sandbox, no registry, no policy files.</p>
+    </div>
+    <div>
+      <h3>Power when asked</h3>
+      <p>Each capability is an independent flag like <code class="inline">AIRGENT_MCP=1</code>. Enable exactly what you need, inspect the state with <code class="inline">airgent status</code> or <code class="inline">GET /api/v1/features</code>.</p>
+    </div>
+  </div>
+</section>
+
+<section class="section container">
+  <div class="section-head"><span class="section-num">§ 02</span><h2>One runtime, four surfaces</h2></div>
+  <p class="section-sub">The same kernel, sessions, and memory — reached however you work.</p>
+  <div class="surfaces">
+    <div class="surfaces-row"><span class="name">CLI</span><span class="desc">One-shot prompts or interactive chat, plus sessions / memory / cron / skills management.</span><span class="cmd">airgent chat "plan my day"</span></div>
+    <div class="surfaces-row"><span class="name">TUI</span><span class="desc">Full-screen terminal UI with a command palette, /resume, and execution detail view.</span><span class="cmd">airgent tui</span></div>
+    <div class="surfaces-row"><span class="name">HTTP API</span><span class="desc">Run, stream, sessions, memory, skills, features, and cron endpoints.</span><span class="cmd">POST /api/v1/agent/run</span></div>
+    <div class="surfaces-row"><span class="name">WebUI</span><span class="desc">A local chat interface served by the same process — zero extra tooling.</span><span class="cmd">http://127.0.0.1:10304</span></div>
+  </div>
+</section>
+
+<footer>
+  <div class="container footer-inner">
+    <div class="left"><img src="assets/airgent.png" alt="">Airgent — local-first personal agent runtime</div>
+    <div class="right">
+      <a href="docs.html">docs</a>
+      <a href="https://github.com/Holidayrabbit/Airgent">github</a>
+      <span>MIT</span>
+    </div>
+  </div>
+</footer>
+
+<script src="assets/main.js"></script>
+</body>
+</html>
