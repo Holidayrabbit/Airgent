@@ -4,8 +4,12 @@ Everything pi needs lives under ~/.airgent/pi/agent so the user's own ~/.pi
 configuration is never touched:
 - models.json     custom "airgent" provider when OPENAI_BASE_URL points at a proxy
 - APPEND_SYSTEM.md  Airgent's operating instructions (appended to pi's prompt)
-- extensions/airgent-memory.ts  search_memory / remember_note tools backed by
-  `python -m app memory ...` against the same SQLite store
+- settings.json   optional skills overlay (only when the skill registry filters)
+- extensions/     airgent-memory (always) + opt-in guardrails / subagent / mcp
+
+Optional capabilities (sandbox, skill registry, MCP, sub-agents, guardrails)
+default to OFF; with everything disabled the result is exactly a plain
+pi-agent wrapper plus the memory tools.
 """
 
 from __future__ import annotations
@@ -17,8 +21,12 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from app.core.config import Settings
+from app.sandbox.base import SandboxSpec
+from app.sandbox.factory import create_sandbox
 
 PROXY_PROVIDER_ID = "airgent"
+
+PI_DIR = Path(__file__).resolve().parents[2] / "pi"
 
 SYSTEM_ADDENDUM = """\
 You are Airgent, a personal AI operating system for an individual user, running
@@ -45,6 +53,20 @@ Behavior rules:
 - If memory seems stale or conflicting, call it out and ask for confirmation.
 """
 
+SUBAGENT_ADDENDUM = """
+Delegation:
+- For large, self-contained subtasks (research sweeps, bulk refactors) you may
+  call `spawn_subagent`. Put every detail the sub-agent needs into `task`;
+  it cannot see this conversation.
+"""
+
+SANDBOX_ADDENDUM = """
+Environment:
+- You are running inside a sandbox: file writes outside the workspace and
+  Airgent data directories may fail, and network access may be blocked.
+  Prefer workspace-relative paths and say so when a sandbox denial blocks you.
+"""
+
 
 @dataclass(frozen=True)
 class PiEnvironment:
@@ -52,6 +74,9 @@ class PiEnvironment:
     session_dir: Path
     provider_model: str | None
     """"--model" argument for proxy deployments, e.g. 'airgent/anthropic/claude-sonnet-4.5'."""
+    sandbox: SandboxSpec
+    extensions: tuple[str, ...]
+    """Extension file names deployed into the agent dir."""
 
 
 def _write_private(path: Path, text: str) -> None:
@@ -69,6 +94,13 @@ def _write_if_changed(path: Path, text: str) -> None:
     _write_private(path, text)
 
 
+def _render_extension(template_name: str, replacements: dict[str, str]) -> str:
+    template = (PI_DIR / template_name).read_text(encoding="utf-8")
+    for placeholder, value in replacements.items():
+        template = template.replace(placeholder, value)
+    return template
+
+
 def _build_models_json(settings: Settings) -> dict | None:
     if not settings.openai_base_url:
         return None
@@ -83,10 +115,45 @@ def _build_models_json(settings: Settings) -> dict | None:
     return {"$schema": "https://pi.dev/schemas/models.schema.json", "providers": {PROXY_PROVIDER_ID: provider}}
 
 
-def _render_memory_extension() -> str:
-    template_path = Path(__file__).resolve().parents[2] / "pi" / "airgent-memory.ts"
-    template = template_path.read_text(encoding="utf-8")
-    return template.replace("__AIRGENT_PYTHON__", json.dumps(sys.executable))
+def _default_guardrails_policy() -> dict:
+    return {
+        "denied_commands": ["rm\\s+-rf\\s+/", "sudo\\s"],
+        "denied_paths": ["(^|/)\\.env$", "secrets/"],
+        "denied_tools": [],
+        "max_bash_timeout": 300,
+        "message": "Blocked by Airgent guardrails policy",
+    }
+
+
+def _write_json_if_missing(path: Path, payload: dict) -> None:
+    if path.exists():
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    _write_private(path, json.dumps(payload, indent=2))
+
+
+def _apply_skills_overlay(settings: Settings) -> None:
+    """Write the skills whitelist into the agent dir settings.json (opt-in)."""
+
+    from app.skills.registry import SkillRegistry
+
+    overlay = SkillRegistry(settings).settings_overlay()
+    settings_path = settings.pi_agent_dir / "settings.json"
+    if overlay is None:
+        # Keep native discovery: drop a stale overlay we may have written.
+        if settings_path.is_file():
+            try:
+                payload = json.loads(settings_path.read_text(encoding="utf-8"))
+            except json.JSONDecodeError:
+                return
+            if isinstance(payload, dict) and "skills" in payload:
+                payload.pop("skills", None)
+                if payload:
+                    settings_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+                else:
+                    settings_path.unlink(missing_ok=True)
+        return
+    _write_if_changed(settings_path, json.dumps(overlay, indent=2))
 
 
 def prepare_environment(settings: Settings) -> PiEnvironment:
@@ -94,6 +161,10 @@ def prepare_environment(settings: Settings) -> PiEnvironment:
     session_dir = settings.pi_session_dir
     agent_dir.mkdir(parents=True, exist_ok=True)
     session_dir.mkdir(parents=True, exist_ok=True)
+
+    sandbox = create_sandbox(settings)
+    for path, content in sandbox.files.items():
+        _write_if_changed(path, content)
 
     models = _build_models_json(settings)
     if models is None:
@@ -114,16 +185,80 @@ def prepare_environment(settings: Settings) -> PiEnvironment:
         _write_if_changed(agent_dir / "models.json", json.dumps(models, indent=2))
         provider_model = f"{PROXY_PROVIDER_ID}/{settings.default_model}"
 
-    _write_if_changed(agent_dir / "APPEND_SYSTEM.md", SYSTEM_ADDENDUM)
-    _write_if_changed(agent_dir / "extensions" / "airgent-memory.ts", _render_memory_extension())
+    addendum = SYSTEM_ADDENDUM
+    if settings.subagents_enabled:
+        addendum += SUBAGENT_ADDENDUM
+    if sandbox.enabled:
+        addendum += SANDBOX_ADDENDUM
+    _write_if_changed(agent_dir / "APPEND_SYSTEM.md", addendum)
 
-    return PiEnvironment(agent_dir=agent_dir, session_dir=session_dir, provider_model=provider_model)
+    python = json.dumps(sys.executable)
+    deployed: list[str] = []
+
+    _write_if_changed(
+        agent_dir / "extensions" / "airgent-memory.ts",
+        _render_extension("airgent-memory.ts", {"__AIRGENT_PYTHON__": python}),
+    )
+    deployed.append("airgent-memory.ts")
+
+    if settings.guardrails_enabled:
+        guardrails_config = settings.guardrails_config
+        _write_json_if_missing(guardrails_config, _default_guardrails_policy())
+        _write_if_changed(
+            agent_dir / "extensions" / "airgent-guardrails.ts",
+            _render_extension(
+                "airgent-guardrails.ts",
+                {"__AIRGENT_GUARDRAILS_CONFIG__": json.dumps(str(guardrails_config))},
+            ),
+        )
+        deployed.append("airgent-guardrails.ts")
+
+    if settings.subagents_enabled:
+        subagent_model = settings.subagents_model or settings.default_model
+        _write_if_changed(
+            agent_dir / "extensions" / "airgent-subagent.ts",
+            _render_extension(
+                "airgent-subagent.ts",
+                {
+                    "__AIRGENT_PI_BIN__": json.dumps(settings.pi_bin),
+                    "__AIRGENT_SUBAGENT_MODEL__": json.dumps(subagent_model),
+                    "__AIRGENT_SUBAGENT_DEPTH__": json.dumps(settings.subagents_max_depth),
+                },
+            ),
+        )
+        deployed.append("airgent-subagent.ts")
+
+    if settings.mcp_enabled:
+        mcp_config = settings.mcp_config
+        _write_json_if_missing(mcp_config, {"mcpServers": {}})
+        _write_if_changed(
+            agent_dir / "extensions" / "airgent-mcp.ts",
+            _render_extension("airgent-mcp.ts", {"__AIRGENT_MCP_CONFIG__": json.dumps(str(mcp_config))}),
+        )
+        deployed.append("airgent-mcp.ts")
+
+    # Remove opt-in extensions that are no longer enabled so stale copies
+    # never keep running with old config paths.
+    optional = {"airgent-guardrails.ts", "airgent-subagent.ts", "airgent-mcp.ts"}
+    for name in optional - set(deployed):
+        (agent_dir / "extensions" / name).unlink(missing_ok=True)
+
+    _apply_skills_overlay(settings)
+
+    return PiEnvironment(
+        agent_dir=agent_dir,
+        session_dir=session_dir,
+        provider_model=provider_model,
+        sandbox=sandbox,
+        extensions=tuple(deployed),
+    )
 
 
 def build_spawn_env(settings: Settings) -> dict[str, str]:
     env = dict(os.environ)
     env["PI_CODING_AGENT_DIR"] = str(settings.pi_agent_dir)
     env["PI_CODING_AGENT_SESSION_DIR"] = str(settings.pi_session_dir)
+    env["AIRGENT_SUBAGENT_DEPTH"] = "0"
     if settings.openai_base_url:
         # Proxy deployments must not accidentally use provider keys from the
         # outer environment; models.json carries the credential.

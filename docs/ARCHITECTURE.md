@@ -9,14 +9,35 @@ The agent brain is [pi](https://pi.dev) (`@earendil-works/pi-coding-agent`), a m
 - `process.py` — subprocess lifecycle, request/response correlation by id, event queue
 - `events.py` — normalizes pi records (text deltas, tool calls, tool results, errors) into typed events
 - `manager.py` — per-session process pool, prompt runs, idle detection, session resume
-- `setup.py` — materializes the isolated pi agent dir under `~/.airgent/pi/agent` (models.json, APPEND_SYSTEM.md, memory extension)
+- `setup.py` — materializes the isolated pi agent dir under `~/.airgent/pi/agent` (models.json, settings.json skills overlay, APPEND_SYSTEM.md, extensions) and resolves the sandbox launch spec
 
-pi owns what it is best at: model routing (15+ providers, OpenAI-compatible proxies), file/shell tools, `.agents/skills` discovery, MCP, conversation compaction, and session trees. The user's own `~/.pi` directory is never touched.
+pi owns what it is best at: model routing (15+ providers, OpenAI-compatible proxies), file/shell tools, `.agents/skills` discovery, and session trees. The user's own `~/.pi` directory is never touched.
+
+## Optional capability layer
+
+Every capability below is behind a default-off flag (`app/core/config.py`);
+with all flags off, the deployment is a plain pi wrapper plus memory tools.
+
+- `app/sandbox/` — wraps the kernel command with a sandbox prefix: `seatbelt`
+  (macOS `sandbox-exec` profile rendered per deployment) or `docker`
+  (bind-mounted container, network-off by default).
+- `app/skills/` — skill registry: discovers skills, stores enable/disable
+  state in `~/.airgent/skills.json`, and projects it into the pi agent dir's
+  `settings.json` skills whitelist when filtering is active.
+- `pi/airgent-guardrails.ts` — `tool_call` interceptor enforcing a JSON policy
+  (denied commands/paths/tools, bash timeout cap).
+- `pi/airgent-subagent.ts` — `spawn_subagent` tool delegating to headless
+  `pi --mode rpc` children with a depth cap (`AIRGENT_SUBAGENT_DEPTH`).
+- `pi/airgent-mcp.ts` — MCP bridge: reads `~/.airgent/mcp.json`
+  (Claude-Desktop-compatible), handshakes with stdio servers, registers their
+  tools as `mcp__<server>__<tool>`.
+- `app/hooks/service.py` — `before_run`/`after_run` shell hooks fed JSON on
+  stdin; a `before_run` hook exiting 2 vetoes the turn.
 
 ## Airgent layers
 
-- `app/agents/runner.py` — `AgentRunnerService`: translates kernel events into progress events consumed by the TUI/API, persists transcripts, injects relevant long-term memory into prompts
-- `app/memory/` — SQLite store for transcripts and long-term memory; the `airgent-memory` pi extension exposes `search_memory`/`remember_note` tools backed by the same database
+- `app/agents/runner.py` — `AgentRunnerService`: translates kernel events into progress events consumed by the TUI/API, persists transcripts, injects core memory blocks and relevant long-term memory into prompts, runs lifecycle hooks, performs automatic memory extraction, and records trace events
+- `app/memory/` — SQLite store for transcripts, long-term memory (kinds, importance, access tracking, decay, dedup), core memory blocks, and trace events; the `airgent-memory` pi extension exposes `search_memory`/`remember_note` tools backed by the same database
 - `app/api/` — FastAPI routes (agent run/stream, sessions, memory, health) + static WebUI
 - `app/cli.py` / `app/tui.py` — CLI commands and the full-screen terminal UI
 

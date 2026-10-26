@@ -92,6 +92,8 @@ Memory inspection:
 airgent memory list
 airgent memory search "uv python"
 airgent memory add "The user prefers uv for Python envs" --tags python,tooling
+airgent memory blocks                                  # core memory blocks
+airgent memory set-block persona "Concise and blunt"
 ```
 
 ## API
@@ -118,6 +120,31 @@ List memory:
 curl http://127.0.0.1:10304/api/v1/memories
 ```
 
+## Optional Capabilities
+
+Airgent is, by default, the simplest pi-agent wrapper. Every modern-agent
+capability below is opt-in via environment variables — flip one on when you
+need it (`airgent status` shows what is enabled; `GET /api/v1/features` over HTTP):
+
+| Feature | Env | What it does |
+|---------|-----|--------------|
+| Sandbox | `AIRGENT_SANDBOX=seatbelt\|docker` | Runs the pi kernel inside a macOS Seatbelt profile or a Docker container; network denied by default. See [docs/sandbox.md](docs/sandbox.md). |
+| Skill registry | `AIRGENT_SKILLS_REGISTRY=1` | Per-skill enable/disable (`airgent skills list/enable/disable`), on top of pi's native `.agents/skills` discovery. |
+| MCP servers | `AIRGENT_MCP=1` | Bridges external MCP servers (Claude-Desktop-compatible `~/.airgent/mcp.json`) into pi tools as `mcp__<server>__<tool>`. |
+| Sub-agents | `AIRGENT_SUBAGENTS=1` | Adds a `spawn_subagent` tool: the root agent delegates self-contained subtasks to fresh headless pi processes, with a depth cap. |
+| Guardrails | `AIRGENT_GUARDRAILS=1` | Policy-driven tool-call blocking (denied commands/paths/tools) via `~/.airgent/guardrails.json`. |
+| Hooks | `AIRGENT_HOOKS=1` | `before_run` / `after_run` shell hooks fed JSON on stdin (`~/.airgent/hooks.json`); `before_run` can veto a run (exit 2). |
+| Memory upgrades | see below | kinds/importance, time decay, dedup, core memory blocks, automatic fact extraction. |
+| Tracing | `AIRGENT_TRACING=1` | Persists per-run trace events (`turn_start`/`turn_end`/`turn_error`) to SQLite for observability. |
+
+Memory upgrades (inspired by mem0 / Letta / Zep):
+
+- `AIRGENT_MEMORY_DEDUP=1` — near-duplicate memories are merged instead of stored twice.
+- `AIRGENT_MEMORY_DECAY_DAYS=N` — importance halves every N days without access; ranked search downgrades stale rows.
+- `AIRGENT_MEMORY_CORE_BLOCKS=1` — Letta-style always-in-context blocks (`airgent memory set-block persona "..."`), injected as `<core-memory>` each turn.
+- `AIRGENT_MEMORY_AUTO_EXTRACT=1` — mines durable facts ("记住…", "I prefer…", "我正在开发…") from every user message into typed memories.
+- Every memory carries a `kind` (`fact|preference|profile|project|event`) and an `importance` weight used by search (`airgent memory add --kind preference --importance 0.9`).
+
 ## Notes
 
 - Local data defaults to `~/.airgent/`; pi state (sessions, model config, extensions) lives under `~/.airgent/pi/` and never touches your own `~/.pi`.
@@ -130,6 +157,15 @@ OPENAI_BASE_URL=https://your-proxy.example.com/v1
 OPENAI_API_MODE=chat_completions
 AIRGENT_MODEL=anthropic/claude-sonnet-4.5
 AIRGENT_PI_BIN=pi
+# Optional capabilities (all default to off — see .env.example)
+#AIRGENT_SANDBOX=seatbelt
+#AIRGENT_SKILLS_REGISTRY=1
+#AIRGENT_MCP=1
+#AIRGENT_SUBAGENTS=1
+#AIRGENT_GUARDRAILS=1
+#AIRGENT_HOOKS=1
+#AIRGENT_MEMORY_DEDUP=1
+#AIRGENT_TRACING=1
 ```
 
 - When `OPENAI_BASE_URL` is set, Airgent configures pi with an `airgent` provider over that proxy; namespaced model IDs such as `anthropic/claude-sonnet-4.5` are forwarded to the proxy as-is.

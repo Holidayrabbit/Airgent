@@ -68,7 +68,7 @@ class PiKernel:
             self._model_argument(),
         ]
         process = PiProcess(
-            command=command,
+            command=[*environment.sandbox.argv_prefix, *command],
             env=build_spawn_env(self.settings),
             cwd=str(self.settings.project_root),
             request_timeout=self.settings.pi_request_timeout_seconds,
@@ -77,6 +77,7 @@ class PiKernel:
         return process
 
     async def _spawn_resuming(self, pi_session_file: str) -> PiProcess:
+        environment = self.prepare()
         command = [
             self.settings.pi_bin,
             "--mode",
@@ -87,7 +88,7 @@ class PiKernel:
             self._model_argument(),
         ]
         process = PiProcess(
-            command=command,
+            command=[*environment.sandbox.argv_prefix, *command],
             env=build_spawn_env(self.settings),
             cwd=str(self.settings.project_root),
             request_timeout=self.settings.pi_request_timeout_seconds,

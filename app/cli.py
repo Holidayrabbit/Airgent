@@ -19,9 +19,11 @@ app = typer.Typer(
 sessions_app = typer.Typer(help="Inspect or delete saved sessions.")
 memory_app = typer.Typer(help="Inspect or manage long-term memory.")
 cron_app = typer.Typer(help="Manage scheduled cron jobs.")
+skills_app = typer.Typer(help="Inspect and toggle skills (requires AIRGENT_SKILLS_REGISTRY=1).")
 app.add_typer(sessions_app, name="sessions")
 app.add_typer(memory_app, name="memory")
 app.add_typer(cron_app, name="cron")
+app.add_typer(skills_app, name="skills")
 
 
 async def _run_once(message: str, *, session_id: str | None, agent_key: str, max_turns: int | None) -> None:
@@ -200,6 +202,8 @@ def search_memory(
 def add_memory(
     content: str,
     tags: str = typer.Option("", help="Comma-separated tags."),
+    kind: str = typer.Option("fact", help="Memory kind: fact, preference, profile, project, event."),
+    importance: float = typer.Option(0.5, min=0.0, max=1.0, help="Importance used by ranked search."),
     source_session_id: str | None = typer.Option(None, help="Optional source session id."),
     format: str = typer.Option("text", "--format", help="Output format: text or json."),
 ) -> None:
@@ -210,6 +214,8 @@ def add_memory(
         content,
         tags=[tag.strip() for tag in tags.split(",") if tag.strip()],
         source_session_id=source_session_id,
+        kind=kind,
+        importance=importance,
     )
     if format == "json":
         typer.echo(
@@ -322,6 +328,155 @@ def cron_trigger(job_id: str) -> None:
         raise typer.Exit(code=1)
     services.cron.trigger_job(job_id)
     typer.echo(f"Triggered {job_id} ({job.name}) — running in background.")
+
+
+@app.command()
+def status() -> None:
+    """Show Airgent configuration and enabled optional features."""
+
+    services = build_services()
+    settings = services.settings
+    typer.echo(f"{settings.app_name} ({settings.environment})")
+    typer.echo(f"  workspace : {settings.project_root}")
+    typer.echo(f"  data dir  : {settings.data_dir}")
+    typer.echo(f"  model     : {settings.default_model}")
+    typer.echo(f"  kernel    : {settings.pi_bin} (agent dir {settings.pi_agent_dir})")
+    typer.echo("Features:")
+    for name, state in settings.enabled_features().items():
+        mark = "enabled " if state not in {False, "none", ""} else "disabled"
+        typer.echo(f"  [{mark}] {name}" + (f" ({state})" if isinstance(state, str) and state else ""))
+
+
+@app.command()
+def sandbox() -> None:
+    """Show the sandbox provider that the kernel would run under."""
+
+    from app.sandbox.factory import create_sandbox
+    from app.sandbox.base import SandboxError
+
+    settings = get_settings()
+    try:
+        spec = create_sandbox(settings)
+    except SandboxError as exc:
+        typer.echo(f"sandbox error: {exc}", err=True)
+        raise typer.Exit(code=1)
+    typer.echo(f"provider: {spec.provider}")
+    typer.echo(f"summary : {spec.summary}")
+    if spec.argv_prefix:
+        typer.echo(f"prefix  : {' '.join(spec.argv_prefix)}")
+
+
+# ------------------------------------------------------------------
+# Memory extras (core blocks)
+# ------------------------------------------------------------------
+@memory_app.command("blocks")
+def memory_blocks() -> None:
+    """List core memory blocks (Letta-style always-in-context notes)."""
+
+    services = build_services()
+    blocks = services.store.list_blocks()
+    if not blocks:
+        typer.echo("No core memory blocks.")
+        return
+    for block in blocks:
+        typer.echo(f"{block.key} ({block.updated_at}):")
+        typer.echo(f"  {block.value}")
+
+
+@memory_app.command("set-block")
+def memory_set_block(key: str, value: str) -> None:
+    """Create or update a core memory block."""
+
+    services = build_services()
+    block = services.store.set_block(key, value)
+    typer.echo(f"Saved block {block.key}")
+
+
+@memory_app.command("delete-block")
+def memory_delete_block(key: str) -> None:
+    """Delete a core memory block."""
+
+    services = build_services()
+    if services.store.delete_block(key):
+        typer.echo(f"Deleted block {key}")
+    else:
+        typer.echo(f"Block {key} not found", err=True)
+        raise typer.Exit(code=1)
+
+
+# ------------------------------------------------------------------
+# Skills registry commands
+# ------------------------------------------------------------------
+@skills_app.command("list")
+def skills_list() -> None:
+    """List discovered skills and their registry state."""
+
+    from app.skills.registry import SkillRegistry
+
+    services = build_services()
+    registry = SkillRegistry(services.settings)
+    entries = registry.discover()
+    if not entries:
+        typer.echo("No skills discovered.")
+        return
+    for entry in entries:
+        state = "on" if registry.is_enabled(entry.name) else "off"
+        typer.echo(f"[{state}] {entry.name}  ({entry.source})  {entry.path}")
+        typer.echo(f"    {entry.description[:120]}")
+
+
+@skills_app.command("enable")
+def skills_enable(name: str) -> None:
+    """Enable a skill in the registry."""
+
+    from app.skills.registry import SkillRegistry
+
+    services = build_services()
+    if SkillRegistry(services.settings).set_enabled(name, True):
+        typer.echo(f"Enabled skill {name}")
+    else:
+        typer.echo(f"Skill {name} not found", err=True)
+        raise typer.Exit(code=1)
+
+
+@skills_app.command("disable")
+def skills_disable(name: str) -> None:
+    """Disable a skill in the registry."""
+
+    from app.skills.registry import SkillRegistry
+
+    services = build_services()
+    if SkillRegistry(services.settings).set_enabled(name, False):
+        typer.echo(f"Disabled skill {name}")
+    else:
+        typer.echo(f"Skill {name} not found", err=True)
+        raise typer.Exit(code=1)
+
+
+@skills_app.command("mode")
+def skills_mode(mode: str = typer.Argument(help="allow_all or deny_all")) -> None:
+    """Set the default policy for undisabled/unenabled skills."""
+
+    from app.skills.registry import SkillRegistry
+
+    services = build_services()
+    try:
+        SkillRegistry(services.settings).set_mode(mode)
+    except ValueError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=1)
+    typer.echo(f"Registry mode set to {mode}")
+
+
+@skills_app.command("add-dir")
+def skills_add_dir(path: str) -> None:
+    """Register an extra skills directory to scan."""
+
+    from app.skills.registry import SkillRegistry
+
+    services = build_services()
+    SkillRegistry(services.settings).add_extra_dir(path)
+    typer.echo(f"Added skills dir {path}")
 
 
 def main() -> None:

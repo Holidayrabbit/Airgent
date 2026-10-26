@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -16,6 +17,18 @@ def utcnow() -> str:
 def _truncate_title(text: str) -> str:
     compact = " ".join(text.split())
     return compact[:48] + ("..." if len(compact) > 48 else "")
+
+
+def _days_since(iso_timestamp: str | None) -> float:
+    if not iso_timestamp:
+        return 0.0
+    try:
+        moment = datetime.fromisoformat(iso_timestamp)
+    except ValueError:
+        return 0.0
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=UTC)
+    return max(0.0, (datetime.now(UTC) - moment).total_seconds() / 86400.0)
 
 
 def _loads_json_list(raw: str | None) -> list[str]:
@@ -60,11 +73,24 @@ class MemoryRecord:
     tags: list[str]
     source_session_id: str | None
     created_at: str
+    kind: str = "fact"  # fact | preference | profile | project | event
+    importance: float = 0.5
+    access_count: int = 0
+    last_accessed_at: str | None = None
+    updated_at: str = ""
+
+
+@dataclass(frozen=True)
+class MemoryBlock:
+    key: str
+    value: str
+    updated_at: str
 
 
 class LocalStore:
-    def __init__(self, db_path: Path) -> None:
+    def __init__(self, db_path: Path, *, dedup: bool = False) -> None:
         self.db_path = db_path
+        self.dedup = dedup
         self.initialize()
 
     def _connect(self) -> sqlite3.Connection:
@@ -146,6 +172,45 @@ class LocalStore:
                 );
                 """
             )
+            self._migrate(connection)
+
+    def _migrate(self, connection: sqlite3.Connection) -> None:
+        """Idempotent column/table upgrades (memory system v2)."""
+
+        memory_columns = {row["name"] for row in connection.execute("PRAGMA table_info(memories)")}
+        additions = {
+            "kind": "TEXT NOT NULL DEFAULT 'fact'",
+            "importance": "REAL NOT NULL DEFAULT 0.5",
+            "access_count": "INTEGER NOT NULL DEFAULT 0",
+            "last_accessed_at": "TEXT",
+            "updated_at": "TEXT NOT NULL DEFAULT ''",
+        }
+        for column, definition in additions.items():
+            if column not in memory_columns:
+                connection.execute(f"ALTER TABLE memories ADD COLUMN {column} {definition}")
+
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS memory_blocks (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+            """
+        )
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS trace_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id TEXT,
+                request_id TEXT,
+                kind TEXT NOT NULL,
+                payload_json TEXT NOT NULL DEFAULT '{}',
+                created_at TEXT NOT NULL
+            )
+            """
+        )
+        connection.execute("UPDATE memories SET updated_at = created_at WHERE updated_at = ''")
 
     def get_kernel_session(self, session_id: str) -> dict[str, str] | None:
         with self._connect() as connection:
@@ -176,6 +241,54 @@ class LocalStore:
             connection.execute(
                 "DELETE FROM kernel_sessions WHERE airgent_session_id = ?", (session_id,)
             )
+
+    # ------------------------------------------------------------------
+    # Trace events (observability)
+    # ------------------------------------------------------------------
+    def append_trace_event(
+        self,
+        *,
+        kind: str,
+        session_id: str | None = None,
+        request_id: str | None = None,
+        payload: dict[str, Any] | None = None,
+    ) -> None:
+        with self._connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO trace_events(session_id, request_id, kind, payload_json, created_at)
+                VALUES(?, ?, ?, ?, ?)
+                """,
+                (
+                    session_id,
+                    request_id,
+                    kind,
+                    json.dumps(payload or {}, ensure_ascii=True, default=str),
+                    utcnow(),
+                ),
+            )
+
+    def list_trace_events(self, limit: int = 100, *, session_id: str | None = None) -> list[dict[str, Any]]:
+        query = "SELECT id, session_id, request_id, kind, payload_json, created_at FROM trace_events"
+        params: tuple[Any, ...]
+        if session_id:
+            query += " WHERE session_id = ?"
+            params = (session_id,)
+        query += " ORDER BY id DESC LIMIT ?"
+        params = (*params, limit)
+        with self._connect() as connection:
+            rows = connection.execute(query, params).fetchall()
+        return [
+            {
+                "id": row["id"],
+                "session_id": row["session_id"],
+                "request_id": row["request_id"],
+                "kind": row["kind"],
+                "payload": _loads_json_dict(row["payload_json"]),
+                "created_at": row["created_at"],
+            }
+            for row in rows
+        ]
 
     def upsert_session(self, session_id: str, agent_key: str, *, title: str | None = None) -> None:
         now = utcnow()
@@ -382,19 +495,48 @@ class LocalStore:
         *,
         tags: list[str] | None = None,
         source_session_id: str | None = None,
+        kind: str = "fact",
+        importance: float = 0.5,
     ) -> MemoryRecord:
+        normalized = content.strip()
+        if self.dedup:
+            existing = self._find_duplicate(normalized)
+            if existing is not None:
+                merged_tags = sorted(set(existing.tags) | {t.strip().lower() for t in tags or [] if t.strip()})
+                self._touch_memory(existing.id)
+                with self._connect() as connection:
+                    connection.execute(
+                        """
+                        UPDATE memories
+                        SET tags_json = ?, kind = ?, importance = MAX(importance, ?), updated_at = ?
+                        WHERE id = ?
+                        """,
+                        (
+                            json.dumps(merged_tags, ensure_ascii=True),
+                            kind,
+                            importance,
+                            utcnow(),
+                            existing.id,
+                        ),
+                    )
+                return self.get_memory(existing.id)  # type: ignore[return-value]
+
         record = MemoryRecord(
             id=uuid4().hex,
-            content=content.strip(),
+            content=normalized,
             tags=sorted({tag.strip().lower() for tag in tags or [] if tag.strip()}),
             source_session_id=source_session_id,
             created_at=utcnow(),
+            kind=kind,
+            importance=max(0.0, min(1.0, importance)),
+            updated_at=utcnow(),
         )
         with self._connect() as connection:
             connection.execute(
                 """
-                INSERT INTO memories(id, content, tags_json, source_session_id, created_at)
-                VALUES(?, ?, ?, ?, ?)
+                INSERT INTO memories(id, content, tags_json, source_session_id, created_at,
+                                     kind, importance, access_count, last_accessed_at, updated_at)
+                VALUES(?, ?, ?, ?, ?, ?, ?, 0, NULL, ?)
                 """,
                 (
                     record.id,
@@ -402,45 +544,152 @@ class LocalStore:
                     json.dumps(record.tags, ensure_ascii=True),
                     record.source_session_id,
                     record.created_at,
+                    record.kind,
+                    record.importance,
+                    record.updated_at,
                 ),
             )
         return record
 
-    def list_memories(self, limit: int = 50) -> list[MemoryRecord]:
-        with self._connect() as connection:
-            rows = connection.execute(
-                """
-                SELECT id, content, tags_json, source_session_id, created_at
-                FROM memories
-                ORDER BY created_at DESC
-                LIMIT ?
-                """,
-                (limit,),
-            ).fetchall()
-        return [
-            MemoryRecord(
-                id=row["id"],
-                content=row["content"],
-                tags=_loads_json_list(row["tags_json"]),
-                source_session_id=row["source_session_id"],
-                created_at=row["created_at"],
-            )
-            for row in rows
-        ]
+    @staticmethod
+    def _tokens(text: str) -> set[str]:
+        return set(re.findall(r"[a-z0-9\u4e00-\u9fff]+", text.lower()))
 
-    def search_memories(self, query: str, *, limit: int = 5) -> list[MemoryRecord]:
+    def _find_duplicate(self, content: str) -> MemoryRecord | None:
+        """Exact or near-duplicate detection (token Jaccard >= 0.8)."""
+
+        candidates = self.list_memories(limit=500)
+        target = self._tokens(content)
+        if not target:
+            return None
+        for record in candidates:
+            if record.content == content:
+                return record
+            other = self._tokens(record.content)
+            if not other:
+                continue
+            jaccard = len(target & other) / len(target | other)
+            if jaccard >= 0.8:
+                return record
+        return None
+
+    def get_memory(self, memory_id: str) -> MemoryRecord | None:
+        with self._connect() as connection:
+            row = connection.execute("SELECT * FROM memories WHERE id = ?", (memory_id,)).fetchone()
+        return self._memory_from_row(row) if row else None
+
+    def delete_memory(self, memory_id: str) -> bool:
+        with self._connect() as connection:
+            cursor = connection.execute("DELETE FROM memories WHERE id = ?", (memory_id,))
+        return cursor.rowcount > 0
+
+    @staticmethod
+    def _memory_from_row(row: sqlite3.Row) -> MemoryRecord:
+        return MemoryRecord(
+            id=row["id"],
+            content=row["content"],
+            tags=_loads_json_list(row["tags_json"]),
+            source_session_id=row["source_session_id"],
+            created_at=row["created_at"],
+            kind=row["kind"] if "kind" in row.keys() else "fact",
+            importance=row["importance"] if "importance" in row.keys() else 0.5,
+            access_count=row["access_count"] if "access_count" in row.keys() else 0,
+            last_accessed_at=row["last_accessed_at"] if "last_accessed_at" in row.keys() else None,
+            updated_at=row["updated_at"] if "updated_at" in row.keys() else "",
+        )
+
+    def list_memories(self, limit: int = 50, *, kind: str | None = None) -> list[MemoryRecord]:
+        query = "SELECT * FROM memories"
+        params: tuple[Any, ...] = ()
+        if kind:
+            query += " WHERE kind = ?"
+            params = (kind,)
+        query += " ORDER BY updated_at DESC, created_at DESC LIMIT ?"
+        params = (*params, limit)
+        with self._connect() as connection:
+            rows = connection.execute(query, params).fetchall()
+        return [self._memory_from_row(row) for row in rows]
+
+    def search_memories(
+        self,
+        query: str,
+        *,
+        limit: int = 5,
+        decay_halflife_days: int = 0,
+    ) -> list[MemoryRecord]:
         tokens = [token for token in {part.lower() for part in query.split()} if token]
-        memories = self.list_memories(limit=200)
+        memories = self.list_memories(limit=500)
         if not tokens:
             return memories[:limit]
 
-        def score(record: MemoryRecord) -> tuple[int, str]:
+        def relevance(record: MemoryRecord) -> float:
             haystack = f"{record.content.lower()} {' '.join(record.tags)}"
-            return (sum(1 for token in tokens if token in haystack), record.created_at)
+            hits = sum(1 for token in tokens if token in haystack)
+            if hits == 0:
+                return 0.0
+            weight = 0.5 + record.importance
+            if decay_halflife_days > 0:
+                anchor = record.last_accessed_at or record.updated_at or record.created_at
+                days = _days_since(anchor)
+                weight *= 0.5 ** (days / decay_halflife_days)
+            return hits * weight
 
-        ranked = [record for record in memories if score(record)[0] > 0]
-        ranked.sort(key=score, reverse=True)
-        return ranked[:limit]
+        ranked = [record for record in memories if relevance(record) > 0]
+        ranked.sort(key=relevance, reverse=True)
+        selected = ranked[:limit]
+        if selected:
+            self._touch_memory(*(record.id for record in selected))
+        return selected
+
+    def _touch_memory(self, *memory_ids: str) -> None:
+        """Record retrieval access (feeds the decay clock)."""
+
+        now = utcnow()
+        with self._connect() as connection:
+            connection.executemany(
+                """
+                UPDATE memories
+                SET access_count = access_count + 1, last_accessed_at = ?
+                WHERE id = ?
+                """,
+                [(now, memory_id) for memory_id in memory_ids],
+            )
+
+    # ------------------------------------------------------------------
+    # Core memory blocks (Letta-style always-in-context blocks)
+    # ------------------------------------------------------------------
+    def get_block(self, key: str) -> MemoryBlock | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT key, value, updated_at FROM memory_blocks WHERE key = ?", (key,)
+            ).fetchone()
+        return MemoryBlock(key=row["key"], value=row["value"], updated_at=row["updated_at"]) if row else None
+
+    def set_block(self, key: str, value: str) -> MemoryBlock:
+        block = MemoryBlock(key=key.strip(), value=value.strip(), updated_at=utcnow())
+        if not block.key:
+            raise ValueError("memory block key must not be empty")
+        with self._connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO memory_blocks(key, value, updated_at) VALUES(?, ?, ?)
+                ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
+                """,
+                (block.key, block.value, block.updated_at),
+            )
+        return block
+
+    def list_blocks(self) -> list[MemoryBlock]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT key, value, updated_at FROM memory_blocks ORDER BY key ASC"
+            ).fetchall()
+        return [MemoryBlock(key=row["key"], value=row["value"], updated_at=row["updated_at"]) for row in rows]
+
+    def delete_block(self, key: str) -> bool:
+        with self._connect() as connection:
+            cursor = connection.execute("DELETE FROM memory_blocks WHERE key = ?", (key,))
+        return cursor.rowcount > 0
 
     # ------------------------------------------------------------------
     # Scheduled Jobs (Cron)

@@ -19,7 +19,12 @@
 
 - 工具由 pi 内建（read/write/edit/bash/grep/…），自定义工具走 pi 扩展
 - Memory 扩展（search_memory / remember_note）：`pi/airgent-memory.ts`（部署时渲染到 pi agent 目录）
-- Skill 机制与编写方式：`docs/agent/skills.md`（pi 原生发现 `.agents/skills/`）
+- Guardrails 扩展（工具策略拦截）：`pi/airgent-guardrails.ts`
+- Sub-agent 扩展（spawn_subagent 委托）：`pi/airgent-subagent.ts`
+- MCP bridge 扩展（mcp.json → pi 工具）：`pi/airgent-mcp.ts`
+- Skill 机制与注册表：`docs/agent/skills.md`（pi 原生发现 `.agents/skills/`；`app/skills/registry.py` 提供启停控制）
+- 沙箱：`app/sandbox/`（seatbelt/docker，见 `docs/sandbox.md`）
+- Lifecycle hooks：`app/hooks/service.py`（before_run / after_run）
 
 ### API / Web / CLI
 
@@ -32,8 +37,15 @@
 
 ### Memory / 存储
 
-- Memory Store（transcripts + memories + kernel_sessions）：`app/memory/store.py`
-- Memory 上下文构建（提示注入）：`app/memory/context_builder.py`
+- Memory Store（transcripts + memories[kind/importance/decay/dedup] + memory_blocks + trace_events + kernel_sessions）：`app/memory/store.py`
+- Memory 上下文构建（core blocks 与记忆注入）：`app/memory/context_builder.py`
+- 自动事实抽取（mem0 风格，启发式）：`app/memory/auto_extract.py`
+
+### 可选能力（默认全关）
+
+- 功能开关唯一入口：`app/core/config.py`（`enabled_features()` 汇报）
+- `airgent status` / `GET /api/v1/features`：查看启用状态
+- 新增可选能力的约定：配置默认 off、模块独立、在 `setup.py`/runner 中按开关接线
 
 ### 配置与启动
 
@@ -44,9 +56,12 @@
 ### 测试
 
 - 测试目录：`tests/`
-- 内核协议与装配测试：`tests/test_kernel.py`
-- Store 测试：`tests/test_store.py`
-- 配置测试：`tests/test_settings_env.py`
+- 内核协议与装配测试：`tests/test_kernel.py`、`tests/test_setup_features.py`
+- Store 测试：`tests/test_store.py`、`tests/test_memory_upgrades.py`
+- 配置测试：`tests/test_settings_env.py`、`tests/test_features_config.py`
+- 沙箱测试：`tests/test_sandbox.py`
+- Skill 注册表测试：`tests/test_skills_registry.py`
+- Hooks 测试：`tests/test_hooks.py`
 - Agent progress / TUI 测试：`tests/test_agent_progress.py`
 
 ## 按问题找入口
@@ -68,7 +83,7 @@
 ## Cursor Cloud specific instructions
 
 - **包管理器**: 项目使用 `uv`。依赖安装命令为 `uv sync`，运行命令前缀为 `uv run`。
-- **测试**: `uv run pytest` 即可运行全部测试（22 个），无需外部服务。
+- **测试**: `uv run pytest` 即可运行全部测试（56 个），无需外部服务。
 - **启动开发服务器**: `uv run airgent serve --reload`，默认监听 `127.0.0.1:10304`。
 - **环境变量**: 需要 `OPENAI_API_KEY`（必须）和 `OPENAI_BASE_URL`（可选，代理地址）。项目会自动加载 `.env` 文件。模型可用 `AIRGENT_MODEL` 覆盖（如 `anthropic/claude-sonnet-4.5`）。
 - **外部依赖**: 需要 `pi` 内核在 PATH（`curl -fsSL https://pi.dev/install.sh | sh` 或 npm 全局安装）；pi 状态隔离在 `~/.airgent/pi/`。

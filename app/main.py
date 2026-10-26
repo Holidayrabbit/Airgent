@@ -9,9 +9,11 @@ from fastapi.staticfiles import StaticFiles
 
 from app.api.routes.agent import router as agent_router
 from app.api.routes.cron import router as cron_router
+from app.api.routes.features import router as features_router
 from app.api.routes.health import router as health_router
 from app.api.routes.memory import router as memory_router
 from app.api.routes.session import router as session_router
+from app.api.routes.skills import router as skills_router
 from app.bootstrap import build_services
 from app.core.config import get_settings
 from app.core.errors import register_exception_handlers
@@ -39,6 +41,8 @@ def create_app() -> FastAPI:
     app.include_router(cron_router, prefix=settings.api_prefix)
     app.include_router(memory_router, prefix=settings.api_prefix)
     app.include_router(session_router, prefix=settings.api_prefix)
+    app.include_router(skills_router, prefix=settings.api_prefix)
+    app.include_router(features_router, prefix=settings.api_prefix)
     app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
     @app.get("/", include_in_schema=False)

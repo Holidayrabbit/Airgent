@@ -10,9 +10,11 @@ from uuid import uuid4
 from app.api.schemas.agent import AgentRunRequest
 from app.core.config import Settings
 from app.core.errors import AppError
+from app.hooks.service import HookService
 from app.kernel.errors import KernelError
 from app.kernel.events import PiEvent
 from app.kernel.manager import PiKernel
+from app.memory.auto_extract import extract_memories
 from app.memory.context_builder import ContextBuilder
 from app.memory.store import LocalStore
 
@@ -50,14 +52,17 @@ class AgentRunnerService:
         store: LocalStore,
         context_builder: ContextBuilder,
         kernel: PiKernel,
+        hooks: HookService | None = None,
     ) -> None:
         self.settings = settings
         self.store = store
         self.context_builder = context_builder
         self.kernel = kernel
+        self.hooks = hooks or HookService(settings)
 
     async def run(self, request: AgentRunRequest, *, request_id: str) -> AgentExecutionResult:
         session_id = self._resolve_session_id(request)
+        await self._before_turn(request, session_id=session_id, request_id=request_id)
         progress: list[AgentProgressEvent] = []
         try:
             result = await self.kernel.run_prompt(
@@ -66,8 +71,10 @@ class AgentRunnerService:
                 on_event=lambda event: self._forward_collect(event, session_id, progress),
             )
         except KernelError as exc:
+            self._trace("turn_error", session_id=session_id, request_id=request_id, payload={"error": str(exc)})
             raise self._normalize_error(exc) from exc
         self._persist(request, session_id=result.session_id, output=result.text, progress=progress)
+        await self._after_turn(request, session_id=session_id, request_id=request_id, output=result.text)
         return AgentExecutionResult(
             request_id=request_id,
             session_id=result.session_id,
@@ -80,6 +87,7 @@ class AgentRunnerService:
         session_id = self._resolve_session_id(request)
         queue: asyncio.Queue[AgentProgressEvent | None] = asyncio.Queue()
         yield AgentProgressEvent(kind="status", summary="run started", session_id=session_id)
+        await self._before_turn(request, session_id=session_id, request_id=request_id)
 
         async def drive() -> None:
             try:
@@ -89,6 +97,7 @@ class AgentRunnerService:
                     on_event=lambda event: self._forward_enqueue(event, session_id, queue),
                 )
             except KernelError as exc:
+                self._trace("turn_error", session_id=session_id, request_id=request_id, payload={"error": str(exc)})
                 await queue.put(AgentProgressEvent(kind="error", summary=str(exc), session_id=session_id))
                 await queue.put(None)
                 return
@@ -113,6 +122,7 @@ class AgentRunnerService:
                 agent_key=self._agent_key(request),
                 metadata={"thread_events": thread_events},
             )
+            await self._after_turn(request, session_id=result.session_id, request_id=request_id, output=result.text)
             await queue.put(
                 AgentProgressEvent(
                     kind="completed",
@@ -147,23 +157,90 @@ class AgentRunnerService:
     def _agent_key(self, request: AgentRunRequest) -> str:
         return request.agent_key or self.settings.default_agent_key
 
+    # ------------------------------------------------------- turn lifecycle
+
+    def _trace(
+        self,
+        kind: str,
+        *,
+        session_id: str | None = None,
+        request_id: str | None = None,
+        payload: dict[str, Any] | None = None,
+    ) -> None:
+        if self.settings.tracing_enabled:
+            self.store.append_trace_event(
+                kind=kind, session_id=session_id, request_id=request_id, payload=payload
+            )
+
+    async def _before_turn(self, request: AgentRunRequest, *, session_id: str, request_id: str) -> None:
+        """Hooks + automatic memory extraction before the kernel sees the prompt."""
+
+        hook = await self.hooks.run(
+            "before_run",
+            {"input": request.input, "session_id": session_id, "agent_key": self._agent_key(request)},
+        )
+        if hook.blocked:
+            raise AppError(
+                code="hook_blocked",
+                message=f"Run blocked by before_run hook: {hook.detail}",
+                status_code=403,
+                details={"hook": hook.detail},
+            )
+        if self.settings.memory_auto_extract:
+            for extracted in extract_memories(request.input):
+                self.store.add_memory(
+                    extracted.content,
+                    kind=extracted.kind,
+                    importance=extracted.importance,
+                    source_session_id=session_id,
+                )
+        self._trace(
+            "turn_start",
+            session_id=session_id,
+            request_id=request_id,
+            payload={"input": request.input, "agent_key": self._agent_key(request)},
+        )
+
+    async def _after_turn(
+        self, request: AgentRunRequest, *, session_id: str, request_id: str, output: str
+    ) -> None:
+        self._trace(
+            "turn_end",
+            session_id=session_id,
+            request_id=request_id,
+            payload={"output_chars": len(output)},
+        )
+        await self.hooks.run(
+            "after_run",
+            {"input": request.input, "output": output, "session_id": session_id},
+        )
+
     def _compose_message(self, request: AgentRunRequest) -> str:
-        """Prepend relevant long-term memory to the outgoing prompt.
+        """Prepend long-term memory hits and core blocks to the outgoing prompt.
 
         pi owns the system prompt and full conversation history; the memory
-        block is only attached when there are hits so ordinary turns stay
+        blocks are only attached when there is content so ordinary turns stay
         untouched.
         """
 
         snapshot = self.context_builder.build(session_id=request.session_id or "", query=request.input)
-        if not snapshot.memories:
+        sections: list[str] = []
+        if snapshot.blocks:
+            block_lines = ["<core-memory>"]
+            for block in snapshot.blocks:
+                block_lines.append(f"<{block.key}>{block.value}</{block.key}>")
+            block_lines.append("</core-memory>")
+            sections.append("\n".join(block_lines))
+        if snapshot.memories:
+            memory_lines = ["<airgent-context>", "Relevant long-term memory:"]
+            for memory in snapshot.memories:
+                tags = f" [tags: {', '.join(memory.tags)}]" if memory.tags else ""
+                memory_lines.append(f"- {memory.content}{tags}")
+            memory_lines.append("</airgent-context>")
+            sections.append("\n".join(memory_lines))
+        if not sections:
             return request.input
-        lines = ["<airgent-context>", "Relevant long-term memory:"]
-        for memory in snapshot.memories:
-            tags = f" [tags: {', '.join(memory.tags)}]" if memory.tags else ""
-            lines.append(f"- {memory.content}{tags}")
-        lines.append("</airgent-context>")
-        return "\n".join(lines) + "\n\n" + request.input
+        return "\n\n".join(sections) + "\n\n" + request.input
 
     def _persist(
         self,
