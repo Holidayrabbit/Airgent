@@ -3,6 +3,8 @@ from __future__ import annotations
 from fastapi import APIRouter, Request
 
 from app.api.schemas.session import (
+    RewindPointResponse,
+    RewindRequest,
     SessionDetailResponse,
     SessionSummaryResponse,
     TranscriptMessageResponse,
@@ -60,3 +62,29 @@ async def get_session(request: Request, session_id: str) -> SessionDetailRespons
 async def delete_session(request: Request, session_id: str) -> dict[str, str]:
     request.app.state.services.store.delete_session(session_id)
     return {"status": "deleted", "session_id": session_id}
+
+
+@router.get("/{session_id}/rewind-points", response_model=list[RewindPointResponse])
+async def list_rewind_points(request: Request, session_id: str) -> list[RewindPointResponse]:
+    points = await request.app.state.services.runner.list_rewind_points(session_id)
+    return [
+        RewindPointResponse(entry_id=str(point.get("entryId") or ""), text=str(point.get("text") or ""))
+        for point in points
+    ]
+
+
+@router.post("/{session_id}/rewind")
+async def rewind_session(request: Request, session_id: str, payload: RewindRequest) -> dict[str, str]:
+    if not payload.entry_id:
+        raise AppError(
+            code="invalid_rewind",
+            message="entry_id is required.",
+            status_code=400,
+        )
+    result = await request.app.state.services.runner.rewind(session_id, payload.entry_id)
+    return {
+        "status": "rewound",
+        "session_id": session_id,
+        "pi_session_id": result.get("pi_session_id", ""),
+        "text": result.get("text", ""),
+    }

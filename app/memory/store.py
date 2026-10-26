@@ -429,6 +429,12 @@ class LocalStore:
             connection.execute("DELETE FROM sessions WHERE session_id = ?", (session_id,))
         self.delete_kernel_session(session_id)
 
+    def clear_transcript(self, session_id: str) -> None:
+        """Drop the mirrored transcript rows (used when rebuilding after rewind)."""
+
+        with self._connect() as connection:
+            connection.execute("DELETE FROM transcripts WHERE session_id = ?", (session_id,))
+
     def add_memory(
         self,
         content: str,

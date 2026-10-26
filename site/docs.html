@@ -41,6 +41,7 @@
         <a href="#/mcp" data-page="mcp">MCP servers</a>
         <a href="#/subagents" data-page="subagents">Sub-agents</a>
         <a href="#/guardrails" data-page="guardrails">Guardrails</a>
+        <a href="#/permissions" data-page="permissions">Permissions &amp; rewind</a>
         <a href="#/hooks" data-page="hooks">Hooks</a>
         <a href="#/tracing" data-page="tracing">Tracing</a>
       </div>
@@ -314,8 +315,40 @@ airgent skills add-dir ~/more-skills</pre>
       <p>Blocked calls return the policy message to the model as the tool error, so it can adapt instead of crashing.</p>
     </section>
 
-    <section class="doc-page" data-page="hooks" data-group="Capabilities">
+    <section class="doc-page" data-page="permissions" data-group="Capabilities">
       <div class="eyebrow">§ capabilities / 06</div>
+      <h1>Permissions &amp; rewind</h1>
+
+      <h2>Permission tiers</h2>
+      <p>Tiered tool permissions, off by default. Enable with <code class="inline">AIRGENT_PERMISSION_MODE</code>:</p>
+      <table class="tbl">
+        <tr><th>Mode</th><th>Behavior</th></tr>
+        <tr><td><code>off</code> (default)</td><td>No checks — the plain pi wrapper</td></tr>
+        <tr><td><code>read-only</code></td><td>write/edit/bash blocked outright (plan-mode style)</td></tr>
+        <tr><td><code>workspace-write</code></td><td>Edits confined to the workspace + <code class="inline">~/.airgent</code>; dangerous bash commands ask first</td></tr>
+      </table>
+      <p>Ask/deny command patterns live in <code class="inline">~/.airgent/permissions.json</code> (empty lists = built-in patterns: <code class="inline">sudo</code>, <code class="inline">rm -rf</code>, <code class="inline">git push</code>, package installs, <code class="inline">curl | sh</code> ask; <code class="inline">rm -rf /</code>, <code class="inline">mkfs</code> deny).</p>
+
+      <h2>How approval reaches you</h2>
+      <ul>
+        <li><strong>TUI</strong> — the prompt appears in the execution log; press <code class="inline">y</code> to allow, <code class="inline">n</code> to deny.</li>
+        <li><strong>WebUI</strong> — a confirm dialog; the answer POSTs to <code class="inline">/api/v1/agent/permission</code>.</li>
+        <li><strong>Headless</strong> (one-shot CLI, cron, <code class="inline">/agent/run</code>) — auto-denied.</li>
+        <li><strong>Timeout</strong> — unanswered prompts are denied after <code class="inline">AIRGENT_PERMISSION_TIMEOUT</code> seconds (default 600).</li>
+      </ul>
+      <div class="callout"><b>Approvals ride the kernel's own UI protocol</b> — the permission extension calls pi's <code class="inline">ctx.ui.confirm</code>, which blocks the tool until a surface answers. No polling, no side channel.</div>
+
+      <h2>Rewind (checkpoints)</h2>
+      <p>Always on, built on the pi kernel's native fork. Rewinding forks the conversation at an earlier user message; the transcript mirror is rebuilt from the forked branch.</p>
+      <pre class="block">airgent sessions rewind &lt;session-id&gt;              <span class="c"># numbered picker</span>
+airgent sessions rewind &lt;session-id&gt; --entry-id &lt;id&gt;
+<span class="c"># TUI: /rewind opens a searchable palette</span>
+curl -X POST .../api/v1/sessions/&lt;id&gt;/rewind -d '{"entry_id": "..."}'</pre>
+      <p>Rewind restores the <strong>conversation</strong>; files already written by the agent are not reverted.</p>
+    </section>
+
+    <section class="doc-page" data-page="hooks" data-group="Capabilities">
+      <div class="eyebrow">§ capabilities / 07</div>
       <h1>Hooks</h1>
       <p>Lifecycle hooks run external commands around agent turns. Off by default; config at <code class="inline">~/.airgent/hooks.json</code> (override with <code class="inline">AIRGENT_HOOKS_CONFIG</code>).</p>
       <pre class="block">{
@@ -338,7 +371,7 @@ exit 0</pre>
     </section>
 
     <section class="doc-page" data-page="tracing" data-group="Capabilities">
-      <div class="eyebrow">§ capabilities / 07</div>
+      <div class="eyebrow">§ capabilities / 08</div>
       <h1>Tracing</h1>
       <p>With <code class="inline">AIRGENT_TRACING=1</code>, every turn records trace events into SQLite (table <code class="inline">trace_events</code>):</p>
       <ul>
@@ -448,6 +481,7 @@ airgent memory delete-block goals</pre>
         <tr><td><code>AIRGENT_MCP</code></td><td><code>1</code> (+<code>AIRGENT_MCP_CONFIG</code>)</td></tr>
         <tr><td><code>AIRGENT_SUBAGENTS</code></td><td><code>1</code> (+<code>_MAX_DEPTH</code>, <code>_MODEL</code>)</td></tr>
         <tr><td><code>AIRGENT_GUARDRAILS</code></td><td><code>1</code> (+<code>_CONFIG</code>)</td></tr>
+        <tr><td><code>AIRGENT_PERMISSION_MODE</code></td><td><code>read-only | workspace-write</code> (+<code>_TIMEOUT</code>, <code>_CONFIG</code>)</td></tr>
         <tr><td><code>AIRGENT_HOOKS</code></td><td><code>1</code> (+<code>_CONFIG</code>)</td></tr>
         <tr><td><code>AIRGENT_MEMORY_DEDUP</code> / <code>_DECAY_DAYS</code> / <code>_CORE_BLOCKS</code> / <code>_AUTO_EXTRACT</code></td><td><code>1</code> / <code>N</code> / <code>1</code> / <code>1</code></td></tr>
         <tr><td><code>AIRGENT_TRACING</code></td><td><code>1</code></td></tr>

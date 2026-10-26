@@ -13,6 +13,8 @@ def test_all_optional_features_default_off(monkeypatch) -> None:
         "AIRGENT_MCP",
         "AIRGENT_SUBAGENTS",
         "AIRGENT_GUARDRAILS",
+        "AIRGENT_PERMISSION_MODE",
+        "AIRGENT_PERMISSIONS",
         "AIRGENT_HOOKS",
         "AIRGENT_MEMORY_AUTO_EXTRACT",
         "AIRGENT_MEMORY_DECAY_DAYS",
@@ -30,6 +32,7 @@ def test_all_optional_features_default_off(monkeypatch) -> None:
     assert features["mcp"] is False
     assert features["subagents"] is False
     assert features["guardrails"] is False
+    assert features["permissions"] is False
     assert features["hooks"] is False
     assert features["memory_auto_extract"] is False
     assert features["memory_decay"] is False
@@ -41,6 +44,7 @@ def test_all_optional_features_default_off(monkeypatch) -> None:
 def test_features_enable_via_env(monkeypatch) -> None:
     monkeypatch.setenv("AIRGENT_SANDBOX", "seatbelt")
     monkeypatch.setenv("AIRGENT_MCP", "true")
+    monkeypatch.setenv("AIRGENT_PERMISSION_MODE", "workspace-write")
     monkeypatch.setenv("AIRGENT_MEMORY_DECAY_DAYS", "30")
     monkeypatch.setenv("AIRGENT_MEMORY_DEDUP", "1")
 
@@ -49,6 +53,7 @@ def test_features_enable_via_env(monkeypatch) -> None:
 
     assert features["sandbox"] == "seatbelt"
     assert features["mcp"] is True
+    assert features["permissions"] == "workspace-write"
     assert features["memory_decay"] is True
     assert features["memory_dedup"] is True
 

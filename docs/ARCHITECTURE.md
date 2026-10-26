@@ -26,6 +26,15 @@ with all flags off, the deployment is a plain pi wrapper plus memory tools.
   `settings.json` skills whitelist when filtering is active.
 - `pi/airgent-guardrails.ts` — `tool_call` interceptor enforcing a JSON policy
   (denied commands/paths/tools, bash timeout cap).
+- `pi/airgent-permissions.ts` — tiered permissions (`read-only` /
+  `workspace-write`): static blocks plus interactive approvals that ride pi's
+  extension UI protocol; `app/kernel/process.py` answers with
+  `extension_ui_response`, the manager relays prompts to the active surface
+  (TUI `y`/`n`, WebUI dialog, `POST /api/v1/agent/permission`) and auto-denies
+  headless or timed-out requests. See `docs/permissions.md`.
+- Session rewind (checkpoints) is kernel-native: `PiKernel.list_fork_points`
+  and `PiKernel.rewind` drive pi's `get_fork_messages`/`fork` RPC, rebind the
+  session mapping, and rebuild the transcript mirror from the forked branch.
 - `pi/airgent-subagent.ts` — `spawn_subagent` tool delegating to headless
   `pi --mode rpc` children with a depth cap (`AIRGENT_SUBAGENT_DEPTH`).
 - `pi/airgent-mcp.ts` — MCP bridge: reads `~/.airgent/mcp.json`

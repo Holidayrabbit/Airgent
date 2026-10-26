@@ -104,6 +104,20 @@ class PiProcess:
             raise KernelError(str(response.get("error") or f"{command_type} failed"))
         return response.get("data") or {}
 
+    async def respond_ui(self, request_id: str, payload: dict[str, Any]) -> None:
+        """Answer an extension_ui_request (e.g. a permission confirm).
+
+        Safe to call while a run is streaming: the response is written
+        directly, without the lock the run loop holds.
+        """
+
+        if not self.alive:
+            raise KernelError("pi process is not running")
+        assert self._proc is not None and self._proc.stdin is not None
+        record = {"type": "extension_ui_response", "id": request_id, **payload}
+        self._proc.stdin.write(json.dumps(record).encode("utf-8") + b"\n")
+        await self._proc.stdin.drain()
+
     async def next_event(self, timeout: float | None = None) -> dict[str, Any] | None:
         if timeout is None:
             return await self._event_queue.get()

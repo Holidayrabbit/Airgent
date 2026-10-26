@@ -79,6 +79,43 @@ def test_disabling_features_removes_stale_extensions(tmp_path: Path) -> None:
     assert not (settings.pi_agent_dir / "extensions" / "airgent-subagent.ts").exists()
 
 
+def test_permissions_extension_deploys_per_mode(tmp_path: Path) -> None:
+    read_only = _settings(tmp_path, permission_mode="read-only")
+    environment = prepare_environment(read_only)
+    assert "airgent-permissions.ts" in environment.extensions
+    rendered = (read_only.pi_agent_dir / "extensions" / "airgent-permissions.ts").read_text()
+    assert "__AIRGENT_PERMISSION_MODE__" not in rendered
+    assert '"read-only"' in rendered
+    assert str(read_only.project_root) in rendered
+    addendum = (read_only.pi_agent_dir / "APPEND_SYSTEM.md").read_text()
+    assert "read-only" in addendum
+
+    workspace_write = _settings(tmp_path, permission_mode="workspace-write")
+    prepare_environment(workspace_write)
+    rendered = (workspace_write.pi_agent_dir / "extensions" / "airgent-permissions.ts").read_text()
+    assert '"workspace-write"' in rendered
+    policy = json.loads(workspace_write.permission_config.read_text())
+    assert policy == {"ask_commands": [], "deny_commands": [], "deny_tools": []}
+
+
+def test_permissions_off_by_default_deploys_nothing(tmp_path: Path) -> None:
+    settings = _settings(tmp_path, permission_mode="workspace-write")
+    prepare_environment(settings)
+    assert (settings.pi_agent_dir / "extensions" / "airgent-permissions.ts").exists()
+
+    prepare_environment(_settings(tmp_path))
+    assert not (settings.pi_agent_dir / "extensions" / "airgent-permissions.ts").exists()
+
+
+def test_invalid_permission_mode_rejected(tmp_path: Path) -> None:
+    import pytest
+
+    from app.kernel.setup import prepare_environment as prepare
+
+    with pytest.raises(ValueError):
+        prepare(_settings(tmp_path, permission_mode="yolo"))
+
+
 def test_skills_overlay_written_when_registry_filters(tmp_path: Path) -> None:
     skills_root = tmp_path / "project" / ".agents" / "skills"
     for name in ("alpha", "beta"):

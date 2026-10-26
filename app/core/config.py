@@ -91,6 +91,19 @@ class Settings(BaseSettings):
     guardrails_enabled: bool = Field(default=False, validation_alias="AIRGENT_GUARDRAILS")
     guardrails_config_path: Path | None = None
 
+    # Permission system: interactive approval + tiered modes, on top of the
+    # static guardrails. Modes: "off" (no checks — default),
+    # "read-only" (block write/edit/bash), "workspace-write" (edits confined
+    # to the workspace; dangerous bash commands ask the user first).
+    permission_mode: str = Field(
+        default="off",
+        validation_alias=AliasChoices("AIRGENT_PERMISSION_MODE", "AIRGENT_PERMISSIONS"),
+    )
+    permission_timeout_seconds: float = Field(
+        default=600.0, validation_alias="AIRGENT_PERMISSION_TIMEOUT"
+    )
+    permission_config_path: Path | None = None
+
     # Hooks: lifecycle commands (before_run / after_run) fed JSON on stdin.
     hooks_enabled: bool = Field(default=False, validation_alias="AIRGENT_HOOKS")
     hooks_config_path: Path | None = None
@@ -134,6 +147,10 @@ class Settings(BaseSettings):
         return self.guardrails_config_path or (self.data_dir / "guardrails.json")
 
     @property
+    def permission_config(self) -> Path:
+        return self.permission_config_path or (self.data_dir / "permissions.json")
+
+    @property
     def hooks_config(self) -> Path:
         return self.hooks_config_path or (self.data_dir / "hooks.json")
 
@@ -149,6 +166,7 @@ class Settings(BaseSettings):
             "mcp": self.mcp_enabled,
             "subagents": self.subagents_enabled,
             "guardrails": self.guardrails_enabled,
+            "permissions": self.permission_mode if self.permission_mode != "off" else False,
             "hooks": self.hooks_enabled,
             "memory_auto_extract": self.memory_auto_extract,
             "memory_decay": self.memory_decay_halflife_days > 0,

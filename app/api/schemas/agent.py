@@ -26,3 +26,9 @@ class AgentOptionResponse(BaseModel):
     model: str
     version: str
     is_default: bool
+
+
+class PermissionRespondRequest(BaseModel):
+    session_id: str = Field(min_length=1, max_length=128)
+    request_id: str = Field(min_length=1, max_length=128)
+    allowed: bool

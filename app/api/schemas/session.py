@@ -26,3 +26,12 @@ class TranscriptMessageResponse(BaseModel):
 class SessionDetailResponse(BaseModel):
     session_id: str
     messages: list[TranscriptMessageResponse]
+
+
+class RewindPointResponse(BaseModel):
+    entry_id: str
+    text: str
+
+
+class RewindRequest(BaseModel):
+    entry_id: str

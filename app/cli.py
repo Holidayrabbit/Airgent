@@ -146,6 +146,35 @@ def delete_session(session_id: str) -> None:
     typer.echo(f"Deleted {session_id}")
 
 
+@sessions_app.command("rewind")
+def rewind_session(
+    session_id: str,
+    entry_id: str | None = typer.Option(None, "--entry-id", help="Fork entry id (skip the picker)."),
+) -> None:
+    """Rewind a session to an earlier user message (pi fork checkpoint)."""
+
+    services = build_services()
+    try:
+        if entry_id is None:
+            points = asyncio.run(services.runner.list_rewind_points(session_id))
+            if not points:
+                typer.echo("No rewind points in this session.")
+                return
+            for index, point in enumerate(points, start=1):
+                preview = " ".join(str(point.get("text") or "").split())[:70]
+                typer.echo(f"{index}. {preview}  (entry {point.get('entryId')})")
+            choice = typer.prompt("Rewind to which message (number)", type=int)
+            if not 1 <= choice <= len(points):
+                typer.echo("Invalid choice.", err=True)
+                raise typer.Exit(code=1)
+            entry_id = str(points[choice - 1].get("entryId") or "")
+        result = asyncio.run(services.runner.rewind(session_id, entry_id))
+    finally:
+        asyncio.run(services.kernel.shutdown())
+    preview = " ".join(result.get("text", "").split())[:80]
+    typer.echo(f"Rewound session {session_id} to: {preview}")
+
+
 @memory_app.command("list")
 def list_memory(limit: int = typer.Option(20, min=1, max=100)) -> None:
     """List recent memory records."""

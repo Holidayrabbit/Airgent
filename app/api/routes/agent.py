@@ -7,9 +7,24 @@ from uuid import uuid4
 from fastapi import APIRouter, Request
 from fastapi.responses import StreamingResponse
 
-from app.api.schemas.agent import AgentOptionResponse, AgentRunRequest, AgentRunResponse
+from app.api.schemas.agent import (
+    AgentOptionResponse,
+    AgentRunRequest,
+    AgentRunResponse,
+    PermissionRespondRequest,
+)
 
 router = APIRouter(prefix="/agent", tags=["agent"])
+
+
+@router.post("/permission")
+async def respond_permission(request: Request, payload: PermissionRespondRequest) -> dict[str, bool]:
+    """Answer a permission_request emitted during an /agent/stream run."""
+
+    answered = await request.app.state.services.runner.respond_permission(
+        payload.session_id, payload.request_id, allowed=payload.allowed
+    )
+    return {"answered": answered}
 
 
 @router.get("/available", response_model=list[AgentOptionResponse])

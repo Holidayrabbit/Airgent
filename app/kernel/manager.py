@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
 
@@ -29,6 +29,8 @@ class _ProcessEntry:
     process: PiProcess
     model: str
     lock: asyncio.Lock
+    pending_ui: dict[str, float] = field(default_factory=dict)
+    """Outstanding extension UI requests: id -> deadline (monotonic)."""
 
 
 @dataclass(frozen=True)
@@ -145,15 +147,25 @@ class PiKernel:
         session_id: str,
         message: str,
         on_event: ProgressCallback | None = None,
+        interactive: bool = False,
     ) -> KernelRunResult:
+        """Run one prompt through the kernel.
+
+        `interactive=True` lets extension UI requests (permission confirms)
+        flow to `on_event` and wait for a `respond_ui` answer; otherwise any
+        request is denied immediately (safe headless default).
+        """
+
         entry = await self._acquire(session_id)
         async with entry.lock:
             if not entry.process.alive:
                 await self._dispose(session_id, entry)
                 entry = await self._acquire(session_id)
                 async with entry.lock:
-                    return await self._run_locked(session_id, entry, message, on_event)
-            return await self._run_locked(session_id, entry, message, on_event)
+                    return await self._run_locked(
+                        session_id, entry, message, on_event, interactive
+                    )
+            return await self._run_locked(session_id, entry, message, on_event, interactive)
 
     async def _run_locked(
         self,
@@ -161,6 +173,7 @@ class PiKernel:
         entry: _ProcessEntry,
         message: str,
         on_event: ProgressCallback | None,
+        interactive: bool,
     ) -> KernelRunResult:
         process = entry.process
         fallback_text = ""
@@ -180,6 +193,7 @@ class PiKernel:
 
         deadline = time.monotonic() + 3600.0
         while time.monotonic() < deadline:
+            self._expire_stale_ui(entry)
             record = await process.next_event(timeout=self.settings.pi_request_timeout_seconds)
             if record is None:
                 if saw_agent_end and await self._is_idle(process):
@@ -205,6 +219,10 @@ class PiKernel:
             if event is None:
                 continue
 
+            if event.kind == "ui_request":
+                await self._handle_ui_request(entry, event, emit, interactive)
+                continue
+
             if event.kind == "text_start":
                 current_message_parts = []
             elif event.kind == "text_delta":
@@ -225,6 +243,7 @@ class PiKernel:
             # No agent_end within the window or empty transcript.
             if not await self._is_idle(process):
                 raise KernelError("pi run did not settle")
+        await self._deny_all_pending_ui(entry)
 
         await self.record_pi_session(session_id)
         if error_message is not None and not final_text:
@@ -244,6 +263,89 @@ class PiKernel:
         except KernelError:
             return True
         return not state.get("isStreaming")
+
+    # ------------------------------------------------------------------
+    # Extension UI (permission approvals)
+    # ------------------------------------------------------------------
+    async def _handle_ui_request(
+        self,
+        entry: _ProcessEntry,
+        event: PiEvent,
+        emit: ProgressCallback,
+        interactive: bool,
+    ) -> None:
+        request_id = str(event.data.get("id") or "")
+        if not request_id:
+            return
+        method = str(event.data.get("method") or "")
+        if method != "confirm" or not interactive:
+            # Only confirm dialogs are supported by Airgent surfaces; anything
+            # else (and every headless request) resolves to the safe default.
+            await self._respond(entry, request_id, allowed=False)
+            return
+        entry.pending_ui[request_id] = time.monotonic() + self.settings.permission_timeout_seconds
+        emit(event)
+
+    async def _respond(self, entry: _ProcessEntry, request_id: str, *, allowed: bool) -> None:
+        entry.pending_ui.pop(request_id, None)
+        try:
+            await entry.process.respond_ui(request_id, {"confirmed": bool(allowed)})
+        except KernelError:
+            pass
+
+    async def respond_ui(self, session_id: str, request_id: str, *, allowed: bool) -> bool:
+        """Answer a pending permission request from outside the run loop."""
+
+        entry = self._entries.get(session_id)
+        if entry is None or request_id not in entry.pending_ui:
+            return False
+        await self._respond(entry, request_id, allowed=allowed)
+        return True
+
+    def _expire_stale_ui(self, entry: _ProcessEntry) -> None:
+        stale = [
+            request_id
+            for request_id, deadline in entry.pending_ui.items()
+            if time.monotonic() > deadline
+        ]
+        for request_id in stale:
+            asyncio.get_running_loop().create_task(self._respond(entry, request_id, allowed=False))
+
+    async def _deny_all_pending_ui(self, entry: _ProcessEntry) -> None:
+        for request_id in list(entry.pending_ui):
+            await self._respond(entry, request_id, allowed=False)
+
+    # ------------------------------------------------------------------
+    # Rewind (session checkpoints via pi fork)
+    # ------------------------------------------------------------------
+    async def list_fork_points(self, session_id: str) -> list[dict[str, Any]]:
+        """User messages this session can be rewound to (pi get_fork_messages)."""
+
+        entry = await self._acquire(session_id)
+        async with entry.lock:
+            data = await entry.process.request("get_fork_messages")
+            return list(data.get("messages") or [])
+
+    async def rewind(self, session_id: str, entry_id: str) -> dict[str, Any]:
+        """Fork the pi conversation at an earlier user message.
+
+        The current process switches onto the new branch; the SQLite binding
+        is refreshed so later runs resume from the rewound state.
+        """
+
+        entry = await self._acquire(session_id)
+        async with entry.lock:
+            data = await entry.process.request("fork", {"entryId": entry_id})
+            if data.get("cancelled"):
+                raise KernelError("rewind was cancelled by an extension")
+            await self.record_pi_session(session_id)
+            state = await self._safe_state(entry.process) or {}
+            messages = await entry.process.request("get_messages")
+            return {
+                "text": str(data.get("text") or ""),
+                "pi_session_id": str(state.get("sessionId") or ""),
+                "messages": list(messages.get("messages") or []),
+            }
 
     async def record_pi_session(self, session_id: str) -> None:
         entry = self._entries.get(session_id)

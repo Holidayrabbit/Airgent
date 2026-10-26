@@ -60,6 +60,18 @@ Delegation:
   it cannot see this conversation.
 """
 
+PERMISSION_ADDENDUM_TEMPLATE = """
+Permissions:
+- You are running under the "{mode}" permission tier.
+- When a tool call is blocked, do not retry it unchanged; explain what was
+  denied and propose an alternative, or ask the user to adjust permissions.
+- Some commands require user approval; the user will be asked and may deny.
+"""
+
+
+def _permission_addendum(mode: str) -> str:
+    return PERMISSION_ADDENDUM_TEMPLATE.format(mode=mode)
+
 SANDBOX_ADDENDUM = """
 Environment:
 - You are running inside a sandbox: file writes outside the workspace and
@@ -125,6 +137,15 @@ def _default_guardrails_policy() -> dict:
     }
 
 
+def _default_permissions_policy() -> dict:
+    # Patterns live in JSON so users can tune them without touching the
+    # rendered extension; empty lists mean "use the extension defaults".
+    return {"ask_commands": [], "deny_commands": [], "deny_tools": []}
+
+
+_PERMISSION_MODES = {"off", "read-only", "workspace-write"}
+
+
 def _write_json_if_missing(path: Path, payload: dict) -> None:
     if path.exists():
         return
@@ -185,9 +206,18 @@ def prepare_environment(settings: Settings) -> PiEnvironment:
         _write_if_changed(agent_dir / "models.json", json.dumps(models, indent=2))
         provider_model = f"{PROXY_PROVIDER_ID}/{settings.default_model}"
 
+    permission_mode = settings.permission_mode.strip().lower()
+    if permission_mode not in _PERMISSION_MODES:
+        raise ValueError(
+            f"Invalid AIRGENT_PERMISSION_MODE {settings.permission_mode!r}; "
+            f"expected one of: {', '.join(sorted(_PERMISSION_MODES))}"
+        )
+
     addendum = SYSTEM_ADDENDUM
     if settings.subagents_enabled:
         addendum += SUBAGENT_ADDENDUM
+    if permission_mode != "off":
+        addendum += _permission_addendum(permission_mode)
     if sandbox.enabled:
         addendum += SANDBOX_ADDENDUM
     _write_if_changed(agent_dir / "APPEND_SYSTEM.md", addendum)
@@ -212,6 +242,23 @@ def prepare_environment(settings: Settings) -> PiEnvironment:
             ),
         )
         deployed.append("airgent-guardrails.ts")
+
+    if permission_mode != "off":
+        permission_config = settings.permission_config
+        _write_json_if_missing(permission_config, _default_permissions_policy())
+        _write_if_changed(
+            agent_dir / "extensions" / "airgent-permissions.ts",
+            _render_extension(
+                "airgent-permissions.ts",
+                {
+                    "__AIRGENT_PERMISSION_MODE__": json.dumps(permission_mode),
+                    "__AIRGENT_WORKSPACE__": json.dumps(str(settings.project_root)),
+                    "__AIRGENT_DATA_DIR__": json.dumps(str(settings.data_dir)),
+                    "__AIRGENT_PERMISSIONS_CONFIG__": json.dumps(str(permission_config)),
+                },
+            ),
+        )
+        deployed.append("airgent-permissions.ts")
 
     if settings.subagents_enabled:
         subagent_model = settings.subagents_model or settings.default_model
@@ -239,7 +286,12 @@ def prepare_environment(settings: Settings) -> PiEnvironment:
 
     # Remove opt-in extensions that are no longer enabled so stale copies
     # never keep running with old config paths.
-    optional = {"airgent-guardrails.ts", "airgent-subagent.ts", "airgent-mcp.ts"}
+    optional = {
+        "airgent-guardrails.ts",
+        "airgent-permissions.ts",
+        "airgent-subagent.ts",
+        "airgent-mcp.ts",
+    }
     for name in optional - set(deployed):
         (agent_dir / "extensions" / name).unlink(missing_ok=True)
 

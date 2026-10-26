@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import json
+import re
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from pathlib import Path
@@ -17,6 +19,11 @@ from app.kernel.manager import PiKernel
 from app.memory.auto_extract import extract_memories
 from app.memory.context_builder import ContextBuilder
 from app.memory.store import LocalStore
+
+
+def _truncate(text: str, limit: int) -> str:
+    compact = " ".join(text.split())
+    return compact[:limit] + ("..." if len(compact) > limit else "")
 
 
 @dataclass(frozen=True)
@@ -69,6 +76,8 @@ class AgentRunnerService:
                 session_id=session_id,
                 message=self._compose_message(request),
                 on_event=lambda event: self._forward_collect(event, session_id, progress),
+                # Headless runs cannot answer permission prompts: deny them.
+                interactive=False,
             )
         except KernelError as exc:
             self._trace("turn_error", session_id=session_id, request_id=request_id, payload={"error": str(exc)})
@@ -95,6 +104,8 @@ class AgentRunnerService:
                     session_id=session_id,
                     message=self._compose_message(request),
                     on_event=lambda event: self._forward_enqueue(event, session_id, queue),
+                    # Streaming surfaces (TUI/WebUI) can answer permission prompts.
+                    interactive=True,
                 )
             except KernelError as exc:
                 self._trace("turn_error", session_id=session_id, request_id=request_id, payload={"error": str(exc)})
@@ -148,6 +159,64 @@ class AgentRunnerService:
                     await task
                 except (asyncio.CancelledError, Exception):
                     pass
+
+    # ------------------------------------------------------- permissions & rewind
+
+    async def respond_permission(self, session_id: str, request_id: str, *, allowed: bool) -> bool:
+        """Answer an outstanding permission prompt (from the TUI, WebUI, or API)."""
+
+        return await self.kernel.respond_ui(session_id, request_id, allowed=allowed)
+
+    async def list_rewind_points(self, session_id: str) -> list[dict[str, Any]]:
+        """User messages the session can be rewound to."""
+
+        return await self.kernel.list_fork_points(session_id)
+
+    async def rewind(self, session_id: str, entry_id: str) -> dict[str, Any]:
+        """Rewind the session to an earlier user message and rebuild the mirror."""
+
+        result = await self.kernel.rewind(session_id, entry_id)
+        self._rebuild_transcript(session_id, result.get("messages") or [])
+        self.store.append_message(
+            session_id,
+            role="system",
+            content=f"[rewind] Conversation restored to: {_truncate(result.get('text', ''), 80)}",
+            agent_key=self.settings.default_agent_key,
+            metadata={"kind": "rewind", "entry_id": entry_id},
+        )
+        return {key: result[key] for key in ("text", "pi_session_id")}
+
+    _CONTEXT_BLOCK = re.compile(
+        r"<(?:airgent-context|core-memory)>.*?</(?:airgent-context|core-memory)>\s*", re.DOTALL
+    )
+
+    def _rebuild_transcript(self, session_id: str, messages: list[Any]) -> None:
+        """Replace the mirrored transcript with pi's post-fork message list."""
+
+        self.store.clear_transcript(session_id)
+        for message in messages:
+            if not isinstance(message, dict):
+                continue
+            role = message.get("role")
+            if role not in {"user", "assistant"}:
+                continue
+            parts = [
+                block.get("text", "")
+                for block in message.get("content") or []
+                if isinstance(block, dict) and block.get("type") == "text"
+            ]
+            content = "\n".join(part for part in parts if part).strip()
+            if not content and isinstance(message.get("content"), str):
+                content = message["content"].strip()
+            if not content:
+                continue
+            if role == "user":
+                content = self._CONTEXT_BLOCK.sub("", content).strip()
+            if not content:
+                continue
+            self.store.append_message(
+                session_id, role=role, content=content, agent_key=self.settings.default_agent_key
+            )
 
     # ------------------------------------------------------------------ helpers
 
@@ -297,6 +366,23 @@ class AgentRunnerService:
         """
 
         kind = event.kind
+        if kind == "ui_request":
+            data = event.data
+            detail = json.dumps(
+                {
+                    "request_id": data.get("id"),
+                    "method": data.get("method"),
+                    "title": data.get("title"),
+                    "message": data.get("message"),
+                },
+                ensure_ascii=False,
+            )
+            return AgentProgressEvent(
+                kind="permission_request",
+                summary=str(data.get("title") or "Permission needed"),
+                detail=detail,
+                session_id=session_id,
+            )
         if kind == "reasoning":
             return AgentProgressEvent(kind="thinking", summary="Analyzing the request")
         if kind == "tool_start":

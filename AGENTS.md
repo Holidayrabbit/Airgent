@@ -20,8 +20,10 @@
 - 工具由 pi 内建（read/write/edit/bash/grep/…），自定义工具走 pi 扩展
 - Memory 扩展（search_memory / remember_note）：`pi/airgent-memory.ts`（部署时渲染到 pi agent 目录）
 - Guardrails 扩展（工具策略拦截）：`pi/airgent-guardrails.ts`
+- Permissions 扩展（分级权限 + 交互批准，走 extension UI 协议）：`pi/airgent-permissions.ts`、`docs/permissions.md`
 - Sub-agent 扩展（spawn_subagent 委托）：`pi/airgent-subagent.ts`
 - MCP bridge 扩展（mcp.json → pi 工具）：`pi/airgent-mcp.ts`
+- 会话回滚（pi fork 检查点）：`app/kernel/manager.py` 的 `list_fork_points`/`rewind`
 - Skill 机制与注册表：`docs/agent/skills.md`（pi 原生发现 `.agents/skills/`；`app/skills/registry.py` 提供启停控制）
 - 沙箱：`app/sandbox/`（seatbelt/docker，见 `docs/sandbox.md`）
 - Lifecycle hooks：`app/hooks/service.py`（before_run / after_run）
@@ -57,6 +59,7 @@
 
 - 测试目录：`tests/`
 - 内核协议与装配测试：`tests/test_kernel.py`、`tests/test_setup_features.py`
+- 权限/回滚内核测试（FakeProcess 假进程）：`tests/test_permissions_kernel.py`
 - Store 测试：`tests/test_store.py`、`tests/test_memory_upgrades.py`
 - 配置测试：`tests/test_settings_env.py`、`tests/test_features_config.py`
 - 沙箱测试：`tests/test_sandbox.py`
@@ -83,7 +86,7 @@
 ## Cursor Cloud specific instructions
 
 - **包管理器**: 项目使用 `uv`。依赖安装命令为 `uv sync`，运行命令前缀为 `uv run`。
-- **测试**: `uv run pytest` 即可运行全部测试（56 个），无需外部服务。
+- **测试**: `uv run pytest` 即可运行全部测试（66 个），无需外部服务。
 - **启动开发服务器**: `uv run airgent serve --reload`，默认监听 `127.0.0.1:10304`。
 - **环境变量**: 需要 `OPENAI_API_KEY`（必须）和 `OPENAI_BASE_URL`（可选，代理地址）。项目会自动加载 `.env` 文件。模型可用 `AIRGENT_MODEL` 覆盖（如 `anthropic/claude-sonnet-4.5`）。
 - **外部依赖**: 需要 `pi` 内核在 PATH（`curl -fsSL https://pi.dev/install.sh | sh` 或 npm 全局安装）；pi 状态隔离在 `~/.airgent/pi/`。

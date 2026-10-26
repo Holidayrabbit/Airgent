@@ -105,6 +105,18 @@
       <span class="flag">AIRGENT_GUARDRAILS=1</span>
     </div>
     <div class="card">
+      <div class="icon">🛡</div>
+      <h3>Permissions</h3>
+      <p>Tiered tool permissions with interactive approval: read-only or workspace-write, dangerous commands ask you first — in the TUI, the WebUI, or auto-denied headless.</p>
+      <span class="flag">AIRGENT_PERMISSION_MODE=workspace-write</span>
+    </div>
+    <div class="card">
+      <div class="icon">↩</div>
+      <h3>Rewind</h3>
+      <p>Session checkpoints on the pi kernel's native fork: rewind any conversation to an earlier message from the CLI, TUI, or API — always on.</p>
+      <span class="flag">airgent sessions rewind</span>
+    </div>
+    <div class="card">
       <div class="icon">⟳</div>
       <h3>Lifecycle hooks</h3>
       <p>before_run / after_run shell hooks fed JSON on stdin. A before_run hook exiting 2 vetoes the turn.</p>

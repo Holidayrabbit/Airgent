@@ -103,6 +103,19 @@ def parse_event(record: dict[str, Any]) -> PiEvent | None:
             )
         return None
 
+    if record_type == "extension_ui_request":
+        # Extension UI sub-protocol: dialog requests (confirm/select/input)
+        # that the host must answer with an `extension_ui_response`.
+        return PiEvent(
+            "ui_request",
+            {
+                "id": record.get("id"),
+                "method": record.get("method"),
+                "title": record.get("title") or "",
+                "message": record.get("message") or "",
+            },
+        )
+
     if record_type == "agent_start":
         return PiEvent("agent_start")
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -129,6 +130,8 @@ class TUIState:
     detail_open: bool = False
     chat_scroll: int = 0
     follow_latest_chat: bool = True
+    pending_permission: dict[str, str] | None = None
+    rewind_points: list[dict[str, str]] = field(default_factory=list)
 
     def sessions(self) -> list[SessionSummary]:
         return self.services.store.list_sessions(limit=30)
@@ -151,6 +154,8 @@ class TUIState:
         self.status = "Started a new session."
         self.chat_scroll = 0
         self.follow_latest_chat = True
+        self.pending_permission = None
+        self.rewind_points = []
 
     def add_local_message(self, content: str) -> None:
         self.messages.append(("assistant", content))
@@ -371,12 +376,24 @@ class AirgentTUI:
             self.state.status = "Exited command palette."
             self._invalidate()
 
+        def _has_pending_permission() -> bool:
+            return self.state.pending_permission is not None
+
+        @kb.add("y", filter=Condition(_has_pending_permission), eager=True)
+        def _permission_allow(event) -> None:
+            event.app.create_background_task(self._answer_permission(True))
+
+        @kb.add("n", filter=Condition(_has_pending_permission), eager=True)
+        def _permission_deny(event) -> None:
+            event.app.create_background_task(self._answer_permission(False))
+
         return kb
 
     def _base_commands(self) -> list[SlashCommand]:
         return [
             SlashCommand("/new", "Start a fresh conversation"),
             SlashCommand("/resume", "Search and resume a previous session"),
+            SlashCommand("/rewind", "Rewind the conversation to an earlier message"),
             SlashCommand("/memory", "Preview recent long-term memory"),
             SlashCommand("/reload", "Reload the current transcript from local storage"),
             SlashCommand("/help", "Show slash command help"),
@@ -391,6 +408,15 @@ class AirgentTUI:
 
     def _is_resume_mode(self) -> bool:
         return self._input_text().startswith("/resume")
+
+    def _is_rewind_mode(self) -> bool:
+        return self._input_text().startswith("/rewind")
+
+    def _rewind_query(self) -> str:
+        text = self._input_text()
+        if not text.startswith("/rewind"):
+            return ""
+        return text[len("/rewind") :].strip().lower()
 
     def _resume_query(self) -> str:
         text = self._input_text()
@@ -430,8 +456,19 @@ class AirgentTUI:
                 matched.append(session)
         return matched
 
+    def _matching_rewind_points(self) -> list[dict[str, str]]:
+        query = self._rewind_query()
+        points = self.state.rewind_points
+        if not query:
+            return points
+        return [point for point in points if query in point.get("text", "").lower()]
+
     def _palette_items(self) -> list[object]:
-        return self._matching_sessions() if self._is_resume_mode() else self._matching_commands()
+        if self._is_resume_mode():
+            return self._matching_sessions()
+        if self._is_rewind_mode():
+            return self._matching_rewind_points()
+        return self._matching_commands()
 
     def _on_input_change(self, _) -> None:
         self.state.palette_index = 0
@@ -499,6 +536,8 @@ class AirgentTUI:
     def _render_palette(self) -> StyleAndTextTuples:
         if self._is_resume_mode():
             return self._render_resume_palette()
+        if self._is_rewind_mode():
+            return self._render_rewind_palette()
         return self._render_command_palette()
 
     def _render_command_palette(self) -> StyleAndTextTuples:
@@ -534,6 +573,23 @@ class AirgentTUI:
             if preview:
                 fragments.append(("class:palette.meta", f"  {preview}\n"))
             fragments.append(("", "\n"))
+        return fragments
+
+    def _render_rewind_palette(self) -> StyleAndTextTuples:
+        points = self._matching_rewind_points()
+        query = self._rewind_query() or "all messages"
+        fragments: StyleAndTextTuples = [("class:palette.title", "Rewind Conversation\n")]
+        fragments.append(("class:palette.search", f"Search: {query}\n\n"))
+        if not points:
+            fragments.append(("class:palette.normal", "No rewind points. Run /rewind again to refresh."))
+            return fragments
+
+        for index, point in enumerate(points):
+            style = "class:palette.current" if index == self.state.palette_index else "class:palette.normal"
+            preview = point.get("text", "").replace("\n", " ")
+            preview = preview[:92] + ("..." if len(preview) > 92 else "")
+            fragments.append((style, f"#{len(points) - index}  {preview[:60]}\n"))
+            fragments.append(("class:palette.meta", f"  {point.get('entry_id', '')}\n\n"))
         return fragments
 
     def _render_footer(self) -> StyleAndTextTuples:
@@ -688,12 +744,24 @@ class AirgentTUI:
             self._invalidate()
             return
 
+        if isinstance(selected, dict):
+            # A rewind point from the /rewind palette.
+            entry_id = str(selected.get("entry_id") or "")
+            self.state.status = "Rewinding..."
+            self._invalidate()
+            await self._do_rewind(entry_id)
+            return
+
         command = selected
         if command.name == "/new":
             self.state.reset_session()
         elif command.name == "/resume":
             self.input_buffer.text = "/resume "
             self.state.status = "Search sessions and press Enter to resume."
+        elif command.name == "/rewind":
+            self.state.status = "Loading rewind points..."
+            self._invalidate()
+            await self._load_rewind_points()
         elif command.name == "/memory":
             memories = self.state.services.store.list_memories(limit=5)
             if not memories:
@@ -715,6 +783,7 @@ class AirgentTUI:
                         "Slash commands:",
                         "- /new",
                         "- /resume",
+                        "- /rewind",
                         "- /memory",
                         "- /reload",
                         "- /help",
@@ -727,6 +796,73 @@ class AirgentTUI:
             self.application.exit()
             return
 
+        self._invalidate()
+
+    async def _load_rewind_points(self) -> None:
+        if not self.state.active_session_id:
+            self.state.add_local_message("No active session to rewind.")
+            self.state.status = "Nothing to rewind."
+            self._invalidate()
+            return
+        try:
+            points = await self.state.services.runner.list_rewind_points(self.state.active_session_id)
+        except Exception as exc:
+            self.state.add_local_message(f"Could not load rewind points: {exc}")
+            self.state.status = "Rewind failed."
+            self._invalidate()
+            return
+        self.state.rewind_points = [
+            {"entry_id": str(point.get("entryId") or ""), "text": str(point.get("text") or "")}
+            for point in points
+        ]
+        if not self.state.rewind_points:
+            self.state.status = "No rewind points in this session."
+            self._invalidate()
+            return
+        self.state.palette_index = 0
+        self.input_buffer.text = "/rewind "
+        self.state.status = "Pick a message to rewind to and press Enter."
+        self._invalidate()
+
+    async def _do_rewind(self, entry_id: str) -> None:
+        if not entry_id or not self.state.active_session_id:
+            self.state.status = "Nothing to rewind."
+            self._invalidate()
+            return
+        try:
+            result = await self.state.services.runner.rewind(self.state.active_session_id, entry_id)
+        except Exception as exc:
+            self.state.add_local_message(f"Rewind failed: {exc}")
+            self.state.status = "Rewind failed."
+            self._invalidate()
+            return
+        self.state.reload_active_session()
+        preview = " ".join(result.get("text", "").split())[:60]
+        self.state.status = f"Rewound to: {preview}"
+        self.state.rewind_points = []
+        self._invalidate()
+
+    async def _answer_permission(self, allowed: bool) -> None:
+        pending = self.state.pending_permission
+        if pending is None:
+            return
+        session_id = pending.get("session_id") or self.state.active_session_id
+        request_id = str(pending.get("request_id") or "")
+        self.state.pending_permission = None
+        answer = "allowed" if allowed else "denied"
+        try:
+            if session_id and request_id:
+                await self.state.services.runner.respond_permission(
+                    session_id, request_id, allowed=allowed
+                )
+        except Exception as exc:
+            self.state.status = f"Permission answer failed: {exc}"
+            self._invalidate()
+            return
+        self.state.execution_log.append(
+            ExecutionEntry(kind="permission", summary=f"Permission {answer}")
+        )
+        self.state.status = f"Permission {answer}."
         self._invalidate()
 
     async def _submit(self) -> None:
@@ -775,8 +911,24 @@ class AirgentTUI:
             self.state.active_session_id = event.session_id or self.state.active_session_id
             self.state.status = event.summary
             return
+        if event.kind == "permission_request":
+            detail = json.loads(event.detail or "{}")
+            detail["session_id"] = event.session_id or self.state.active_session_id
+            self.state.pending_permission = detail
+            title = str(detail.get("title") or "Permission needed")
+            message = str(detail.get("message") or "")
+            self.state.execution_log.append(
+                ExecutionEntry(
+                    kind="permission",
+                    summary=f"Permission needed: {title}",
+                    detail=f"{message}\n\nPress [y] to allow, [n] to deny.",
+                )
+            )
+            self.state.status = f"{title} — [y] allow / [n] deny"
+            return
         if event.kind == "completed":
             self.state.active_session_id = event.session_id or self.state.active_session_id
+            self.state.pending_permission = None
             self.state.reload_active_session()
             self.state.status = "Run completed."
             return

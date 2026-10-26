@@ -360,6 +360,35 @@ function upsertLiveThreadEvent(event) {
   state.liveThread.events.push(entry);
 }
 
+async function handlePermissionRequest(event) {
+  upsertLiveThreadEvent(event);
+  renderMessages();
+  let detail = {};
+  try {
+    detail = JSON.parse(event.detail || "{}");
+  } catch (error) {
+    detail = {};
+  }
+  const title = detail.title || "Permission needed";
+  const message = detail.message || "";
+  // window.confirm blocks this stream reader until the user answers; the
+  // kernel waits for our extension_ui_response, so the run simply pauses.
+  const allowed = window.confirm(`Allow: ${title}\n\n${message}`);
+  try {
+    await fetchJson("/api/v1/agent/permission", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        session_id: detail.session_id || state.sessionId,
+        request_id: detail.request_id,
+        allowed,
+      }),
+    });
+  } catch (error) {
+    console.error("permission answer failed", error);
+  }
+}
+
 async function loadSessions() {
   const sessions = await fetchJson("/api/v1/sessions");
   renderSessions(sessions);
@@ -453,6 +482,10 @@ async function sendMessage(message) {
           state.sessionId = event.session_id;
         }
         if (event.kind === "status") {
+          return;
+        }
+        if (event.kind === "permission_request") {
+          handlePermissionRequest(event);
           return;
         }
         if (event.kind === "completed") {

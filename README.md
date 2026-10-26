@@ -77,6 +77,8 @@ Inside the TUI:
 - `Enter` sends the current prompt
 - `/` opens the command palette
 - `/resume` searches and restores a previous session
+- `/rewind` rewinds the conversation to an earlier message
+- When a permission prompt appears: `y` allows, `n` denies
 - `Ctrl-O` toggles full execution details for thinking/tool activity
 
 Session inspection:
@@ -133,6 +135,8 @@ need it (`airgent status` shows what is enabled; `GET /api/v1/features` over HTT
 | MCP servers | `AIRGENT_MCP=1` | Bridges external MCP servers (Claude-Desktop-compatible `~/.airgent/mcp.json`) into pi tools as `mcp__<server>__<tool>`. |
 | Sub-agents | `AIRGENT_SUBAGENTS=1` | Adds a `spawn_subagent` tool: the root agent delegates self-contained subtasks to fresh headless pi processes, with a depth cap. |
 | Guardrails | `AIRGENT_GUARDRAILS=1` | Policy-driven tool-call blocking (denied commands/paths/tools) via `~/.airgent/guardrails.json`. |
+| Permissions | `AIRGENT_PERMISSION_MODE=read-only\|workspace-write` | Tiered tool permissions (Claude Code / Codex style). `workspace-write` confines edits to the workspace and asks for confirmation on dangerous bash commands — the prompt reaches the TUI (`[y]`/`[n]`), the WebUI (confirm dialog), or is auto-denied in headless runs. |
+| Rewind | always on | Checkpoints via the pi kernel's fork: rewind any session to an earlier user message (`airgent sessions rewind`, TUI `/rewind`, `POST /api/v1/sessions/{id}/rewind`); the transcript mirror is rebuilt from the forked branch. |
 | Hooks | `AIRGENT_HOOKS=1` | `before_run` / `after_run` shell hooks fed JSON on stdin (`~/.airgent/hooks.json`); `before_run` can veto a run (exit 2). |
 | Memory upgrades | see below | kinds/importance, time decay, dedup, core memory blocks, automatic fact extraction. |
 | Tracing | `AIRGENT_TRACING=1` | Persists per-run trace events (`turn_start`/`turn_end`/`turn_error`) to SQLite for observability. |
