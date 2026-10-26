@@ -32,7 +32,15 @@ _DOCKER_ENV_KEYS = (
 def docker_spec(settings: Settings) -> SandboxSpec:
     if not settings.project_root.is_dir():
         raise SandboxError(f"workspace directory missing: {settings.project_root}")
+    if settings.sandbox_mode not in {"read-only", "workspace-write", "full"}:
+        raise SandboxError(
+            f"Unknown sandbox mode {settings.sandbox_mode!r}; "
+            "expected read-only, workspace-write, or full."
+        )
 
+    workspace_mount = f"{settings.project_root}:{settings.project_root}"
+    if settings.sandbox_mode == "read-only":
+        workspace_mount += ":ro"
     argv = [
         "docker",
         "run",
@@ -41,7 +49,7 @@ def docker_spec(settings: Settings) -> SandboxSpec:
         "-w",
         str(settings.project_root),
         "-v",
-        f"{settings.project_root}:{settings.project_root}",
+        workspace_mount,
         "-v",
         f"{settings.data_dir}:{settings.data_dir}",
     ]
@@ -59,5 +67,5 @@ def docker_spec(settings: Settings) -> SandboxSpec:
     return SandboxSpec(
         provider="docker",
         argv_prefix=argv,
-        summary=f"docker image={settings.sandbox_image} network={network}",
+        summary=f"docker image={settings.sandbox_image} mode={settings.sandbox_mode} network={network}",
     )

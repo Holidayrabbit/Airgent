@@ -29,6 +29,7 @@ class _ProcessEntry:
     process: PiProcess
     model: str
     lock: asyncio.Lock
+    mode: str = "default"
     pending_ui: dict[str, float] = field(default_factory=dict)
     """Outstanding extension UI requests: id -> deadline (monotonic)."""
 
@@ -39,6 +40,8 @@ class KernelRunResult:
     session_id: str
     pi_session_id: str
     model: str
+    stats: dict[str, Any] = field(default_factory=dict)
+    """Token/cost usage from get_session_stats (empty when unavailable)."""
 
 
 class PiKernel:
@@ -60,7 +63,7 @@ class PiKernel:
             return environment.provider_model
         return self.settings.default_model
 
-    async def _spawn(self) -> PiProcess:
+    async def _spawn(self, mode: str = "default") -> PiProcess:
         environment = self.prepare()
         command = [
             self.settings.pi_bin,
@@ -71,14 +74,14 @@ class PiKernel:
         ]
         process = PiProcess(
             command=[*environment.sandbox.argv_prefix, *command],
-            env=build_spawn_env(self.settings),
+            env=build_spawn_env(self.settings, mode=mode),
             cwd=str(self.settings.project_root),
             request_timeout=self.settings.pi_request_timeout_seconds,
         )
         await process.start()
         return process
 
-    async def _spawn_resuming(self, pi_session_file: str) -> PiProcess:
+    async def _spawn_resuming(self, pi_session_file: str, mode: str = "default") -> PiProcess:
         environment = self.prepare()
         command = [
             self.settings.pi_bin,
@@ -91,7 +94,7 @@ class PiKernel:
         ]
         process = PiProcess(
             command=[*environment.sandbox.argv_prefix, *command],
-            env=build_spawn_env(self.settings),
+            env=build_spawn_env(self.settings, mode=mode),
             cwd=str(self.settings.project_root),
             request_timeout=self.settings.pi_request_timeout_seconds,
         )
@@ -104,32 +107,34 @@ class PiKernel:
             return None
         return name.rsplit("_", 1)[-1]
 
-    async def _acquire(self, session_id: str) -> _ProcessEntry:
+    async def _acquire(self, session_id: str, mode: str = "default") -> _ProcessEntry:
         model = self._model_argument()
         async with self._entries_lock:
             entry = self._entries.get(session_id)
-            if entry is not None and (not entry.process.alive or entry.model != model):
+            if entry is not None and (
+                not entry.process.alive or entry.model != model or entry.mode != mode
+            ):
                 await self._dispose(session_id, entry)
                 entry = None
             if entry is None:
-                entry = await self._create_entry(session_id, model)
+                entry = await self._create_entry(session_id, model, mode)
                 self._entries[session_id] = entry
             return entry
 
-    async def _create_entry(self, session_id: str, model: str) -> _ProcessEntry:
+    async def _create_entry(self, session_id: str, model: str, mode: str) -> _ProcessEntry:
         mapping = self.store.get_kernel_session(session_id)
         resume_file = mapping["pi_session_file"] if mapping and mapping["model"] == model else None
         if resume_file and Path(resume_file).is_file():
-            process = await self._spawn_resuming(resume_file)
+            process = await self._spawn_resuming(resume_file, mode)
             expected = self._expected_pi_session_id(resume_file)
             state = await self._safe_state(process)
             if state is not None and (expected is None or state.get("sessionId") == expected):
-                return _ProcessEntry(process=process, model=model, lock=asyncio.Lock())
+                return _ProcessEntry(process=process, model=model, lock=asyncio.Lock(), mode=mode)
             # Resume failed (stale/corrupt file): fall through to a fresh session.
             await process.close()
 
-        process = await self._spawn()
-        return _ProcessEntry(process=process, model=model, lock=asyncio.Lock())
+        process = await self._spawn(mode)
+        return _ProcessEntry(process=process, model=model, lock=asyncio.Lock(), mode=mode)
 
     async def _safe_state(self, process: PiProcess) -> dict[str, Any] | None:
         try:
@@ -148,19 +153,22 @@ class PiKernel:
         message: str,
         on_event: ProgressCallback | None = None,
         interactive: bool = False,
+        mode: str = "default",
     ) -> KernelRunResult:
         """Run one prompt through the kernel.
 
         `interactive=True` lets extension UI requests (permission confirms)
         flow to `on_event` and wait for a `respond_ui` answer; otherwise any
-        request is denied immediately (safe headless default).
+        request is denied immediately (safe headless default). `mode="plan"`
+        spawns the kernel with AIRGENT_RUN_MODE=plan, which the permission
+        extension enforces as read-only.
         """
 
-        entry = await self._acquire(session_id)
+        entry = await self._acquire(session_id, mode)
         async with entry.lock:
             if not entry.process.alive:
                 await self._dispose(session_id, entry)
-                entry = await self._acquire(session_id)
+                entry = await self._acquire(session_id, mode)
                 async with entry.lock:
                     return await self._run_locked(
                         session_id, entry, message, on_event, interactive
@@ -246,6 +254,7 @@ class PiKernel:
         await self._deny_all_pending_ui(entry)
 
         await self.record_pi_session(session_id)
+        await self._deny_all_pending_ui(entry)
         if error_message is not None and not final_text:
             raise KernelError(error_message)
 
@@ -255,7 +264,28 @@ class PiKernel:
             session_id=session_id,
             pi_session_id=str(state.get("sessionId") or ""),
             model=entry.model,
+            stats=await self._session_stats(process),
         )
+
+    @staticmethod
+    async def _session_stats(process: PiProcess) -> dict[str, Any]:
+        """Best-effort token/cost snapshot; never fails the run."""
+
+        try:
+            data = await process.request("get_session_stats")
+        except KernelError:
+            return {}
+        tokens = data.get("tokens") or {}
+        context = data.get("contextUsage") or {}
+        return {
+            "tokens_input": tokens.get("input", 0),
+            "tokens_output": tokens.get("output", 0),
+            "tokens_total": tokens.get("total", 0),
+            "cost_usd": data.get("cost", 0.0),
+            "context_tokens": context.get("tokens"),
+            "context_window": context.get("contextWindow"),
+            "context_percent": context.get("percent"),
+        }
 
     async def _is_idle(self, process: PiProcess) -> bool:
         try:

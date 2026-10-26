@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
 import pytest
@@ -61,3 +62,64 @@ def test_docker_prefix_mounts_workspace(tmp_path: Path) -> None:
 def test_unknown_provider_raises(tmp_path: Path) -> None:
     with pytest.raises(SandboxError):
         create_sandbox(_settings(tmp_path, sandbox_provider="bubblewrap"))
+
+
+def test_seatbelt_read_only_profile_has_no_workspace_write(tmp_path: Path) -> None:
+    settings = _settings(tmp_path, sandbox_provider="seatbelt", sandbox_mode="read-only")
+    spec = create_sandbox(settings)
+
+    profile = spec.files[settings.pi_agent_dir / "sandbox.sb"]
+    assert f'(subpath "{settings.project_root}")' not in profile
+    assert f'(subpath "{settings.data_dir}")' in profile
+
+
+def test_seatbelt_full_profile_allows_all_writes(tmp_path: Path) -> None:
+    settings = _settings(tmp_path, sandbox_provider="seatbelt", sandbox_mode="full")
+    spec = create_sandbox(settings)
+
+    profile = spec.files[settings.pi_agent_dir / "sandbox.sb"]
+    assert "(allow file-write*)" in profile
+
+
+def test_seatbelt_invalid_mode_raises(tmp_path: Path) -> None:
+    with pytest.raises(SandboxError):
+        create_sandbox(_settings(tmp_path, sandbox_provider="seatbelt", sandbox_mode="yolo"))
+
+
+def test_docker_read_only_mount(tmp_path: Path) -> None:
+    settings = _settings(tmp_path, sandbox_provider="docker", sandbox_mode="read-only")
+    spec = create_sandbox(settings)
+
+    assert f"{settings.project_root}:{settings.project_root}:ro" in spec.argv_prefix
+
+
+def test_docker_invalid_mode_raises(tmp_path: Path) -> None:
+    with pytest.raises(SandboxError):
+        create_sandbox(_settings(tmp_path, sandbox_provider="docker", sandbox_mode="yolo"))
+
+
+def test_landlock_requires_linux(tmp_path: Path) -> None:
+    import sys
+
+    from app.sandbox.landlock import landlock_spec
+
+    settings = _settings(tmp_path, sandbox_provider="landlock", sandbox_mode="workspace-write")
+    if sys.platform == "linux":
+        spec = landlock_spec(settings)
+        assert spec.argv_prefix[0].endswith("python")
+        assert "app.sandbox.landlock" in " ".join(spec.argv_prefix)
+    else:
+        with pytest.raises(SandboxError):
+            landlock_spec(settings)
+
+
+def test_landlock_read_only_omits_workspace_root(tmp_path: Path) -> None:
+    settings = _settings(tmp_path, sandbox_provider="landlock", sandbox_mode="read-only")
+    if sys.platform != "linux":
+        pytest.skip("landlock is Linux-only")
+
+    spec = create_sandbox(settings)
+    argv = " ".join(spec.argv_prefix)
+    assert str(settings.project_root) not in argv
+    assert str(settings.data_dir) in argv
+

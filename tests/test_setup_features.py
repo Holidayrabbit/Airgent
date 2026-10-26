@@ -116,6 +116,36 @@ def test_invalid_permission_mode_rejected(tmp_path: Path) -> None:
         prepare(_settings(tmp_path, permission_mode="yolo"))
 
 
+def test_tool_hooks_deployed_only_when_declared(tmp_path: Path) -> None:
+    # No hooks.json: extension absent even with hooks_enabled.
+    settings = _settings(tmp_path, hooks_enabled=True)
+    prepare_environment(settings)
+    assert not (settings.pi_agent_dir / "extensions" / "airgent-tool-hooks.ts").exists()
+
+    # Turn-level hooks only: still absent.
+    config = tmp_path / "hooks.json"
+    config.write_text(
+        json.dumps({"hooks": {"before_run": [{"command": "true"}]}}), encoding="utf-8"
+    )
+    settings = _settings(tmp_path, hooks_enabled=True, hooks_config_path=config)
+    prepare_environment(settings)
+    assert not (settings.pi_agent_dir / "extensions" / "airgent-tool-hooks.ts").exists()
+
+    # A declared before_tool entry deploys the extension with the config path.
+    config.write_text(
+        json.dumps({"hooks": {"before_tool": [{"command": "/bin/audit.sh", "timeout": 5}]}}),
+        encoding="utf-8",
+    )
+    prepare_environment(settings)
+    rendered = (settings.pi_agent_dir / "extensions" / "airgent-tool-hooks.ts").read_text()
+    assert "__AIRGENT_HOOKS_CONFIG__" not in rendered
+    assert str(config) in rendered
+
+    # Disabling hooks removes the stale extension.
+    prepare_environment(_settings(tmp_path))
+    assert not (settings.pi_agent_dir / "extensions" / "airgent-tool-hooks.ts").exists()
+
+
 def test_skills_overlay_written_when_registry_filters(tmp_path: Path) -> None:
     skills_root = tmp_path / "project" / ".agents" / "skills"
     for name in ("alpha", "beta"):

@@ -130,16 +130,18 @@ need it (`airgent status` shows what is enabled; `GET /api/v1/features` over HTT
 
 | Feature | Env | What it does |
 |---------|-----|--------------|
-| Sandbox | `AIRGENT_SANDBOX=seatbelt\|docker` | Runs the pi kernel inside a macOS Seatbelt profile or a Docker container; network denied by default. See [docs/sandbox.md](docs/sandbox.md). |
+| Sandbox | `AIRGENT_SANDBOX=seatbelt\|docker\|landlock` | Runs the pi kernel inside a macOS Seatbelt profile, a Docker container, or (Linux ≥5.13) an unprivileged Landlock ruleset. Tiered via `AIRGENT_SANDBOX_MODE=read-only\|workspace-write\|full`; network denied by default. See [docs/sandbox.md](docs/sandbox.md). |
 | Skill registry | `AIRGENT_SKILLS_REGISTRY=1` | Per-skill enable/disable (`airgent skills list/enable/disable`), on top of pi's native `.agents/skills` discovery. |
 | MCP servers | `AIRGENT_MCP=1` | Bridges external MCP servers (Claude-Desktop-compatible `~/.airgent/mcp.json`) into pi tools as `mcp__<server>__<tool>`. |
 | Sub-agents | `AIRGENT_SUBAGENTS=1` | Adds a `spawn_subagent` tool: the root agent delegates self-contained subtasks to fresh headless pi processes, with a depth cap. |
 | Guardrails | `AIRGENT_GUARDRAILS=1` | Policy-driven tool-call blocking (denied commands/paths/tools) via `~/.airgent/guardrails.json`. |
 | Permissions | `AIRGENT_PERMISSION_MODE=read-only\|workspace-write` | Tiered tool permissions (Claude Code / Codex style). `workspace-write` confines edits to the workspace and asks for confirmation on dangerous bash commands — the prompt reaches the TUI (`[y]`/`[n]`), the WebUI (confirm dialog), or is auto-denied in headless runs. |
 | Rewind | always on | Checkpoints via the pi kernel's fork: rewind any session to an earlier user message (`airgent sessions rewind`, TUI `/rewind`, `POST /api/v1/sessions/{id}/rewind`); the transcript mirror is rebuilt from the forked branch. |
-| Hooks | `AIRGENT_HOOKS=1` | `before_run` / `after_run` shell hooks fed JSON on stdin (`~/.airgent/hooks.json`); `before_run` can veto a run (exit 2). |
+| Tool hooks | `AIRGENT_HOOKS=1` + tool entries in `hooks.json` | `before_tool` / `after_tool` shell hooks fed `{tool, arguments}` JSON on stdin per tool call; `before_tool` exit 2 blocks the tool (Claude Code PreToolUse/PostToolUse style). |
+| Plan mode | always on | Read-only runs that end in an implementation proposal: `airgent chat "design X" --plan`, TUI `/plan <task>`, or `"plan": true` on the API. Write tools are blocked for the run; the user approves before anything executes. |
+| Cost tracking | `AIRGENT_COST_TRACKING=1` | Records per-run token/cost usage from the kernel into the transcript; `airgent cost` shows cumulative spend, and `AIRGENT_MAX_BUDGET_USD` (0 = off) refuses further runs once crossed. |
 | Memory upgrades | see below | kinds/importance, time decay, dedup, core memory blocks, automatic fact extraction. |
-| Tracing | `AIRGENT_TRACING=1` | Persists per-run trace events (`turn_start`/`turn_end`/`turn_error`) to SQLite for observability. |
+| Tracing | `AIRGENT_TRACING=1` | Persists per-run trace events (`turn_start`/`turn_end`/`turn_error`/`usage`) to SQLite for observability. |
 
 Memory upgrades (inspired by mem0 / Letta / Zep):
 

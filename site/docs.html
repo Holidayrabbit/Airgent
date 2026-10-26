@@ -42,6 +42,8 @@
         <a href="#/subagents" data-page="subagents">Sub-agents</a>
         <a href="#/guardrails" data-page="guardrails">Guardrails</a>
         <a href="#/permissions" data-page="permissions">Permissions &amp; rewind</a>
+        <a href="#/plan" data-page="plan">Plan mode</a>
+        <a href="#/cost" data-page="cost">Cost tracking</a>
         <a href="#/hooks" data-page="hooks">Hooks</a>
         <a href="#/tracing" data-page="tracing">Tracing</a>
       </div>
@@ -217,15 +219,18 @@ export AIRGENT_SANDBOX=docker     <span class="c"># any host with Docker</span>
 airgent sandbox                   <span class="c"># print the effective provider</span></pre>
 
       <h2>seatbelt (macOS, recommended)</h2>
-      <p>Airgent renders a <code class="inline">sandbox-exec</code> profile to <code class="inline">~/.airgent/pi/agent/sandbox.sb</code> and launches pi behind <code class="inline">/usr/bin/sandbox-exec -f</code>.</p>
+      <p>Airgent renders a <code class="inline">sandbox-exec</code> profile to <code class="inline">~/.airgent/pi/agent/sandbox.sb</code> and launches pi behind <code class="inline">/usr/bin/sandbox-exec -f</code>. In <code class="inline">read-only</code> the workspace write subpath is omitted; in <code class="inline">full</code> the write filter is dropped.</p>
       <ul>
         <li>Deny-by-default; system paths remain readable.</li>
-        <li>Writes confined to the workspace, <code class="inline">~/.airgent</code>, <code class="inline">/private/tmp</code>, and <code class="inline">/private/var/folders</code>.</li>
+        <li>Writes confined per the <strong>mode tier</strong> plus <code class="inline">~/.airgent</code>, <code class="inline">/private/tmp</code>, <code class="inline">/private/var/folders</code>.</li>
         <li>Network denied unless <code class="inline">AIRGENT_SANDBOX_NETWORK=1</code>.</li>
       </ul>
 
+      <h2>landlock (Linux ≥ 5.13, zero dependencies)</h2>
+      <p>Unprivileged kernel sandboxing with no helper binary: Airgent re-execs the kernel through <code class="inline">python -m app.sandbox.landlock --root DIR -- pi ...</code>, which installs a Landlock ruleset (write rights only under the allowed roots) and then execs pi, covering the kernel and everything it spawns. Landlock governs the filesystem only; network is not covered by this provider.</p>
+
       <h2>docker (experimental)</h2>
-      <p>The kernel runs as <code class="inline">docker run --rm -i</code> with the workspace and <code class="inline">~/.airgent</code> bind-mounted at their host paths, <code class="inline">--network none</code> by default, plus a whitelist of environment variables.</p>
+      <p>The kernel runs as <code class="inline">docker run --rm -i</code> with the workspace and <code class="inline">~/.airgent</code> bind-mounted at their host paths (<code class="inline">:ro</code> on the workspace in <code class="inline">read-only</code>), <code class="inline">--network none</code> by default, plus a whitelist of environment variables.</p>
       <pre class="block">FROM node:20-bookworm-slim
 RUN apt-get update &amp;&amp; apt-get install -y --no-install-recommends python3 \
     &amp;&amp; rm -rf /var/lib/apt/lists/*
@@ -347,8 +352,34 @@ curl -X POST .../api/v1/sessions/&lt;id&gt;/rewind -d '{"entry_id": "..."}'</pre
       <p>Rewind restores the <strong>conversation</strong>; files already written by the agent are not reverted.</p>
     </section>
 
-    <section class="doc-page" data-page="hooks" data-group="Capabilities">
+    <section class="doc-page" data-page="plan" data-group="Capabilities">
       <div class="eyebrow">§ capabilities / 07</div>
+      <h1>Plan mode</h1>
+      <p>Read-only runs that end in a proposal — the Claude Code / OpenCode pattern. Always available:</p>
+      <pre class="block">airgent chat "design the auth flow" --plan   <span class="c"># CLI</span>
+/plan design the auth flow                   <span class="c"># TUI</span>
+{"input": "...", "plan": true}               <span class="c"># API</span></pre>
+      <p>A plan run does three things:</p>
+      <ul>
+        <li>The kernel spawns with <code class="inline">AIRGENT_RUN_MODE=plan</code>; when the permission extension is active it enforces <strong>read-only</strong> for that process (write/edit/bash blocked).</li>
+        <li>The prompt is prefixed with explicit plan-mode instructions: investigate, then present a numbered implementation plan with risks and open questions.</li>
+        <li>Plan runs live in the same session tree — approve by sending a normal (non-plan) message afterwards, and the agent executes against the plan it just wrote.</li>
+      </ul>
+      <div class="callout"><b>Permission tiers still apply</b> — with the tier <code class="inline">off</code>, plan mode relies on the prompt instructions only. For hard enforcement combine with <code class="inline">AIRGENT_PERMISSION_MODE=workspace-write</code>.</div>
+    </section>
+
+    <section class="doc-page" data-page="cost" data-group="Capabilities">
+      <div class="eyebrow">§ capabilities / 08</div>
+      <h1>Cost tracking</h1>
+      <p>With <code class="inline">AIRGENT_COST_TRACKING=1</code>, every completed run records the kernel's <code class="inline">get_session_stats</code> snapshot — tokens in/out/total, cost in USD, context-window usage — as a <code class="inline">[usage]</code> system entry in the transcript (and a <code class="inline">usage</code> trace event).</p>
+      <pre class="block">airgent cost
+<span class="c"># Recorded spend: $0.4312</span>
+<span class="c"># Budget cap:     $10.00  (4.3% used)</span></pre>
+      <p>Set <code class="inline">AIRGENT_MAX_BUDGET_USD</code> (default 0 = off) for a hard cap: once cumulative recorded spend crosses it, further runs are refused with a clear <code class="inline">budget_exceeded</code> error (HTTP 402) until you raise the cap. The run-level stats also ride the API response's <code class="inline">context</code> object, so the WebUI and any API client can display them.</p>
+    </section>
+
+    <section class="doc-page" data-page="hooks" data-group="Capabilities">
+      <div class="eyebrow">§ capabilities / 09</div>
       <h1>Hooks</h1>
       <p>Lifecycle hooks run external commands around agent turns. Off by default; config at <code class="inline">~/.airgent/hooks.json</code> (override with <code class="inline">AIRGENT_HOOKS_CONFIG</code>).</p>
       <pre class="block">{
@@ -357,6 +388,9 @@ curl -X POST .../api/v1/sessions/&lt;id&gt;/rewind -d '{"entry_id": "..."}'</pre
     "after_run":  [{ "command": "/path/to/notify.sh", "timeout": 10 }]
   }
 }</pre>
+      <h2>Tool-level hooks</h2>
+      <p>Declare <code class="inline">before_tool</code> / <code class="inline">after_tool</code> entries in the same file (Claude-Code PreToolUse/PostToolUse style) and Airgent additionally deploys a kernel-side extension: <code class="inline">before_tool</code> runs per tool call with <code class="inline">{tool, arguments}</code> on stdin and <strong>exit 2 blocks the tool</strong> (stdout becomes the reason shown to the model); <code class="inline">after_tool</code> receives <code class="inline">{tool, arguments, content, isError}</code> and is observational. The extension deploys only when those entries exist.</p>
+
       <h2>Conventions</h2>
       <ul>
         <li>Each hook receives the turn payload as JSON on <strong>stdin</strong> — <code class="inline">{input, session_id, agent_key}</code> before, plus <code class="inline">output</code> after.</li>
@@ -371,7 +405,7 @@ exit 0</pre>
     </section>
 
     <section class="doc-page" data-page="tracing" data-group="Capabilities">
-      <div class="eyebrow">§ capabilities / 08</div>
+      <div class="eyebrow">§ capabilities / 10</div>
       <h1>Tracing</h1>
       <p>With <code class="inline">AIRGENT_TRACING=1</code>, every turn records trace events into SQLite (table <code class="inline">trace_events</code>):</p>
       <ul>
@@ -482,7 +516,9 @@ airgent memory delete-block goals</pre>
         <tr><td><code>AIRGENT_SUBAGENTS</code></td><td><code>1</code> (+<code>_MAX_DEPTH</code>, <code>_MODEL</code>)</td></tr>
         <tr><td><code>AIRGENT_GUARDRAILS</code></td><td><code>1</code> (+<code>_CONFIG</code>)</td></tr>
         <tr><td><code>AIRGENT_PERMISSION_MODE</code></td><td><code>read-only | workspace-write</code> (+<code>_TIMEOUT</code>, <code>_CONFIG</code>)</td></tr>
-        <tr><td><code>AIRGENT_HOOKS</code></td><td><code>1</code> (+<code>_CONFIG</code>)</td></tr>
+        <tr><td><code>AIRGENT_HOOKS</code></td><td><code>1</code> (+<code>_CONFIG</code>; before_tool/after_tool entries deploy tool hooks)</td></tr>
+        <tr><td><code>AIRGENT_SANDBOX_MODE</code></td><td><code>read-only | workspace-write | full</code> (tier for every sandbox provider)</td></tr>
+        <tr><td><code>AIRGENT_COST_TRACKING</code> / <code>AIRGENT_MAX_BUDGET_USD</code></td><td><code>1</code> / <code>USD</code> (0 = off)</td></tr>
         <tr><td><code>AIRGENT_MEMORY_DEDUP</code> / <code>_DECAY_DAYS</code> / <code>_CORE_BLOCKS</code> / <code>_AUTO_EXTRACT</code></td><td><code>1</code> / <code>N</code> / <code>1</code> / <code>1</code></td></tr>
         <tr><td><code>AIRGENT_TRACING</code></td><td><code>1</code></td></tr>
       </table>

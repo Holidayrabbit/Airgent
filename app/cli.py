@@ -26,7 +26,9 @@ app.add_typer(cron_app, name="cron")
 app.add_typer(skills_app, name="skills")
 
 
-async def _run_once(message: str, *, session_id: str | None, agent_key: str) -> None:
+async def _run_once(
+    message: str, *, session_id: str | None, agent_key: str, plan: bool = False
+) -> None:
     services = build_services()
     try:
         result = await services.runner.run(
@@ -34,6 +36,7 @@ async def _run_once(message: str, *, session_id: str | None, agent_key: str) -> 
                 input=message,
                 session_id=session_id,
                 agent_key=agent_key,
+                plan=plan,
             ),
             request_id="cli",
         )
@@ -64,11 +67,12 @@ def chat(
     message: Annotated[str | None, typer.Argument(help="Run a single prompt. Omit for interactive chat.")] = None,
     session_id: str | None = typer.Option(None, "--session", help="Reuse an existing session id."),
     agent_key: str = typer.Option(get_settings().default_agent_key, "--agent", help="Agent config key."),
+    plan: bool = typer.Option(False, "--plan", help="Plan mode: read-only run ending in a proposal."),
 ) -> None:
     """Chat with Airgent in one-shot or interactive mode."""
 
     if message is not None:
-        asyncio.run(_run_once(message, session_id=session_id, agent_key=agent_key))
+        asyncio.run(_run_once(message, session_id=session_id, agent_key=agent_key, plan=plan))
         return
 
     services = build_services()
@@ -370,6 +374,23 @@ def status() -> None:
     for name, state in settings.enabled_features().items():
         mark = "enabled " if state not in {False, "none", ""} else "disabled"
         typer.echo(f"  [{mark}] {name}" + (f" ({state})" if isinstance(state, str) and state else ""))
+
+
+@app.command()
+def cost() -> None:
+    """Show cumulative recorded token/cost usage (requires AIRGENT_COST_TRACKING=1)."""
+
+    services = build_services()
+    total = services.store.total_cost_usd()
+    limit = services.settings.max_budget_usd
+    typer.echo(f"Recorded spend: ${total:.4f}")
+    if limit > 0:
+        used = min(100.0, total / limit * 100) if limit else 0.0
+        typer.echo(f"Budget cap:     ${limit:.2f}  ({used:.1f}% used)")
+    else:
+        typer.echo("Budget cap:     none (AIRGENT_MAX_BUDGET_USD unset)")
+    if not services.settings.cost_tracking_enabled:
+        typer.echo("Note: AIRGENT_COST_TRACKING is off; only new runs record usage.", err=True)
 
 
 @app.command()

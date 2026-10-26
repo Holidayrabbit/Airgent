@@ -26,6 +26,15 @@ def _truncate(text: str, limit: int) -> str:
     return compact[:limit] + ("..." if len(compact) > limit else "")
 
 
+PLAN_MODE_INSTRUCTIONS = """<airgent-plan-mode>
+You are in PLAN MODE for this turn: do not modify files or run state-changing
+commands. Investigate (read, search, inspect) as needed, then present a
+concrete numbered implementation plan, ending with risks or open questions
+that need the user's decision. The user will approve before anything executes.
+</airgent-plan-mode>
+"""
+
+
 @dataclass(frozen=True)
 class AgentExecutionResult:
     request_id: str
@@ -69,43 +78,48 @@ class AgentRunnerService:
 
     async def run(self, request: AgentRunRequest, *, request_id: str) -> AgentExecutionResult:
         session_id = self._resolve_session_id(request)
+        self._check_budget()
         await self._before_turn(request, session_id=session_id, request_id=request_id)
         progress: list[AgentProgressEvent] = []
         try:
             result = await self.kernel.run_prompt(
                 session_id=session_id,
-                message=self._compose_message(request),
+                message=self._compose_message(request, plan=request.plan),
                 on_event=lambda event: self._forward_collect(event, session_id, progress),
                 # Headless runs cannot answer permission prompts: deny them.
                 interactive=False,
+                mode="plan" if request.plan else "default",
             )
         except KernelError as exc:
             self._trace("turn_error", session_id=session_id, request_id=request_id, payload={"error": str(exc)})
             raise self._normalize_error(exc) from exc
         self._persist(request, session_id=result.session_id, output=result.text, progress=progress)
+        self._record_usage(session_id, result.stats)
         await self._after_turn(request, session_id=session_id, request_id=request_id, output=result.text)
         return AgentExecutionResult(
             request_id=request_id,
             session_id=result.session_id,
             agent_key=self._agent_key(request),
             output=result.text,
-            context={"model": result.model, "pi_session_id": result.pi_session_id},
+            context={"model": result.model, "pi_session_id": result.pi_session_id, **result.stats},
         )
 
     async def stream(self, request: AgentRunRequest, *, request_id: str) -> AsyncIterator[AgentProgressEvent]:
         session_id = self._resolve_session_id(request)
         queue: asyncio.Queue[AgentProgressEvent | None] = asyncio.Queue()
         yield AgentProgressEvent(kind="status", summary="run started", session_id=session_id)
+        self._check_budget()
         await self._before_turn(request, session_id=session_id, request_id=request_id)
 
         async def drive() -> None:
             try:
                 result = await self.kernel.run_prompt(
                     session_id=session_id,
-                    message=self._compose_message(request),
+                    message=self._compose_message(request, plan=request.plan),
                     on_event=lambda event: self._forward_enqueue(event, session_id, queue),
                     # Streaming surfaces (TUI/WebUI) can answer permission prompts.
                     interactive=True,
+                    mode="plan" if request.plan else "default",
                 )
             except KernelError as exc:
                 self._trace("turn_error", session_id=session_id, request_id=request_id, payload={"error": str(exc)})
@@ -133,6 +147,7 @@ class AgentRunnerService:
                 agent_key=self._agent_key(request),
                 metadata={"thread_events": thread_events},
             )
+            self._record_usage(result.session_id, result.stats)
             await self._after_turn(request, session_id=result.session_id, request_id=request_id, output=result.text)
             await queue.put(
                 AgentProgressEvent(
@@ -218,6 +233,42 @@ class AgentRunnerService:
                 session_id, role=role, content=content, agent_key=self.settings.default_agent_key
             )
 
+    # ------------------------------------------------------- cost tracking
+
+    def _check_budget(self) -> None:
+        """Refuse runs once cumulative spend crosses the configured cap."""
+
+        limit = self.settings.max_budget_usd
+        if limit <= 0:
+            return
+        spent = self.store.total_cost_usd()
+        if spent >= limit:
+            raise AppError(
+                code="budget_exceeded",
+                message=(
+                    f"Cumulative spend ${spent:.4f} reached the AIRGENT_MAX_BUDGET_USD "
+                    f"cap of ${limit:.2f}; raise the cap to continue."
+                ),
+                status_code=402,
+                details={"spent_usd": spent, "budget_usd": limit},
+            )
+
+    def _record_usage(self, session_id: str, stats: dict[str, Any]) -> None:
+        if not self.settings.cost_tracking_enabled or not stats:
+            return
+        self.store.append_message(
+            session_id,
+            role="system",
+            content=(
+                f"[usage] tokens: {stats.get('tokens_total', 0)} "
+                f"(in {stats.get('tokens_input', 0)}, out {stats.get('tokens_output', 0)}) "
+                f"cost: ${stats.get('cost_usd', 0):.4f}"
+            ),
+            agent_key=self.settings.default_agent_key,
+            metadata={"kind": "usage", "stats": stats},
+        )
+        self._trace("usage", session_id=session_id, payload=stats)
+
     # ------------------------------------------------------------------ helpers
 
     def _resolve_session_id(self, request: AgentRunRequest) -> str:
@@ -284,16 +335,18 @@ class AgentRunnerService:
             {"input": request.input, "output": output, "session_id": session_id},
         )
 
-    def _compose_message(self, request: AgentRunRequest) -> str:
+    def _compose_message(self, request: AgentRunRequest, *, plan: bool = False) -> str:
         """Prepend long-term memory hits and core blocks to the outgoing prompt.
 
         pi owns the system prompt and full conversation history; the memory
         blocks are only attached when there is content so ordinary turns stay
-        untouched.
+        untouched. Plan-mode runs get explicit read-only instructions.
         """
 
-        snapshot = self.context_builder.build(session_id=request.session_id or "", query=request.input)
         sections: list[str] = []
+        if plan:
+            sections.append(PLAN_MODE_INSTRUCTIONS)
+        snapshot = self.context_builder.build(session_id=request.session_id or "", query=request.input)
         if snapshot.blocks:
             block_lines = ["<core-memory>"]
             for block in snapshot.blocks:

@@ -80,7 +80,8 @@ class FakeProcess:
 def _kernel_with_fake(tmp_path: Path, fake: FakeProcess) -> PiKernel:
     kernel = PiKernel(settings=_settings(tmp_path), store=LocalStore(tmp_path / "store.db"))
 
-    async def fake_spawn() -> FakeProcess:
+    async def fake_spawn(mode: str = "default") -> FakeProcess:
+        fake.spawned_mode = mode
         return fake
 
     kernel._spawn = fake_spawn  # type: ignore[assignment]

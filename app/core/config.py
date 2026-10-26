@@ -59,11 +59,16 @@ class Settings(BaseSettings):
     # baseline deployment stays a plain pi-agent wrapper.
     # ------------------------------------------------------------------
 
-    # Sandbox: run the pi kernel subprocess inside an OS/container sandbox.
-    # provider: "none" | "seatbelt" (macOS sandbox-exec) | "docker"
+    # Sandbox: run the pi kernel subprocess inside an OS/kernel sandbox.
+    # provider: "none" | "seatbelt" (macOS) | "docker" | "landlock" (Linux)
+    # mode: "read-only" | "workspace-write" (default) | "full"
     sandbox_provider: str = Field(
         default="none",
         validation_alias=AliasChoices("AIRGENT_SANDBOX", "AIRGENT_SANDBOX_PROVIDER"),
+    )
+    sandbox_mode: str = Field(
+        default="workspace-write",
+        validation_alias=AliasChoices("AIRGENT_SANDBOX_MODE", "AIRGENT_SANDBOX_TIER"),
     )
     sandbox_image: str = Field(default="node:20-bookworm-slim")
     sandbox_network: bool = Field(default=False, validation_alias="AIRGENT_SANDBOX_NETWORK")
@@ -121,6 +126,12 @@ class Settings(BaseSettings):
     # Observability: record per-run trace events in SQLite.
     tracing_enabled: bool = Field(default=False, validation_alias="AIRGENT_TRACING")
 
+    # Cost tracking: record per-run token/cost usage from the kernel
+    # (get_session_stats) into transcript metadata, and optionally refuse
+    # runs once cumulative spend crosses AIRGENT_MAX_BUDGET_USD (0 = off).
+    cost_tracking_enabled: bool = Field(default=False, validation_alias="AIRGENT_COST_TRACKING")
+    max_budget_usd: float = Field(default=0.0, ge=0.0, validation_alias="AIRGENT_MAX_BUDGET_USD")
+
     def ensure_directories(self) -> None:
         self.project_root.mkdir(parents=True, exist_ok=True)
         self.data_dir.mkdir(parents=True, exist_ok=True)
@@ -173,6 +184,8 @@ class Settings(BaseSettings):
             "memory_core_blocks": self.memory_core_blocks,
             "memory_dedup": self.memory_dedup,
             "tracing": self.tracing_enabled,
+            "cost_tracking": self.cost_tracking_enabled,
+            "budget_usd": self.max_budget_usd if self.max_budget_usd > 0 else False,
         }
 
 

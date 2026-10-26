@@ -394,6 +394,7 @@ class AirgentTUI:
             SlashCommand("/new", "Start a fresh conversation"),
             SlashCommand("/resume", "Search and resume a previous session"),
             SlashCommand("/rewind", "Rewind the conversation to an earlier message"),
+            SlashCommand("/plan", "Plan the next message: read-only run ending in a proposal"),
             SlashCommand("/memory", "Preview recent long-term memory"),
             SlashCommand("/reload", "Reload the current transcript from local storage"),
             SlashCommand("/help", "Show slash command help"),
@@ -762,6 +763,9 @@ class AirgentTUI:
             self.state.status = "Loading rewind points..."
             self._invalidate()
             await self._load_rewind_points()
+        elif command.name == "/plan":
+            self.input_buffer.text = "/plan "
+            self.state.status = "Describe the task; the plan run stays read-only."
         elif command.name == "/memory":
             memories = self.state.services.store.list_memories(limit=5)
             if not memories:
@@ -784,6 +788,7 @@ class AirgentTUI:
                         "- /new",
                         "- /resume",
                         "- /rewind",
+                        "- /plan",
                         "- /memory",
                         "- /reload",
                         "- /help",
@@ -874,8 +879,16 @@ class AirgentTUI:
             self._invalidate()
             return
 
+        plan_mode = prompt.startswith("/plan ")
+        if plan_mode:
+            prompt = prompt[len("/plan ") :].strip()
+            if not prompt:
+                self.state.status = "Describe the task after /plan."
+                self._invalidate()
+                return
+
         self.state.busy = True
-        self.state.status = "Waiting for model..."
+        self.state.status = "Plan mode: investigating (read-only)..." if plan_mode else "Waiting for model..."
         self.state.execution_log = []
         self.state.follow_latest_chat = True
         self.input_buffer.text = ""
@@ -890,6 +903,7 @@ class AirgentTUI:
                     input=prompt,
                     session_id=self.state.active_session_id,
                     agent_key=self.state.agent_key,
+                    plan=plan_mode,
                 ),
                 request_id="tui",
             ):

@@ -77,8 +77,8 @@
     <div class="card">
       <div class="icon">◍</div>
       <h3>Sandbox</h3>
-      <p>Run the kernel inside a macOS Seatbelt profile or a Docker container. Writes confined to the workspace; network denied by default.</p>
-      <span class="flag">AIRGENT_SANDBOX=seatbelt|docker</span>
+      <p>Run the kernel inside a macOS Seatbelt profile, a Docker container, or an unprivileged Linux Landlock ruleset. Tiered: read-only, workspace-write, or full; network denied by default.</p>
+      <span class="flag">AIRGENT_SANDBOX=landlock · _MODE=read-only</span>
     </div>
     <div class="card">
       <div class="icon">✦</div>
@@ -119,8 +119,20 @@
     <div class="card">
       <div class="icon">⟳</div>
       <h3>Lifecycle hooks</h3>
-      <p>before_run / after_run shell hooks fed JSON on stdin. A before_run hook exiting 2 vetoes the turn.</p>
+      <p>Turn-level before_run / after_run hooks, plus tool-level before_tool / after_tool hooks (exit 2 blocks the tool) — Claude-Code style, one hooks.json.</p>
       <span class="flag">AIRGENT_HOOKS=1</span>
+    </div>
+    <div class="card">
+      <div class="icon">☰</div>
+      <h3>Plan mode</h3>
+      <p>Read-only runs that end in a numbered implementation proposal. Write tools blocked for the run; you approve before anything executes.</p>
+      <span class="flag">airgent chat --plan · /plan</span>
+    </div>
+    <div class="card">
+      <div class="icon">$</div>
+      <h3>Cost tracking</h3>
+      <p>Per-run token and cost usage recorded from the kernel, cumulative spend on demand, and an optional hard budget cap that refuses further runs.</p>
+      <span class="flag">AIRGENT_MAX_BUDGET_USD=10</span>
     </div>
     <div class="card">
       <div class="icon">◉</div>

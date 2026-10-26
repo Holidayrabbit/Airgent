@@ -27,6 +27,12 @@ const WORKSPACE: string = __AIRGENT_WORKSPACE__;
 const DATA_DIR: string = __AIRGENT_DATA_DIR__;
 const CONFIG_PATH: string = __AIRGENT_PERMISSIONS_CONFIG__;
 
+// Per-run override: plan runs (AIRGENT_RUN_MODE=plan, set by the kernel
+// manager when a request asks for plan mode) are enforced read-only even
+// when the deployment tier is workspace-write.
+const RUN_MODE = String(process.env.AIRGENT_RUN_MODE ?? "default");
+const EFFECTIVE_MODE = RUN_MODE === "plan" ? "read-only" : MODE;
+
 interface PermissionPolicy {
 	ask_commands?: string[];
 	deny_commands?: string[];
@@ -81,7 +87,7 @@ const denyCommands = compile(policy.deny_commands, DEFAULT_DENY_COMMANDS);
 const denyTools = new Set(policy.deny_tools ?? []);
 
 function blocked(reason: string) {
-	return { block: true, reason: `Airgent permissions (${MODE}): ${reason}` };
+	return { block: true, reason: `Airgent permissions (${EFFECTIVE_MODE}): ${reason}` };
 }
 
 function insideRoot(candidate: string, root: string): boolean {
@@ -103,14 +109,14 @@ export default function (pi: any) {
 			return blocked(`tool '${tool}' is denied by policy`);
 		}
 
-		if (MODE === "read-only") {
+		if (EFFECTIVE_MODE === "read-only") {
 			if (MUTATING_TOOLS.has(tool)) {
 				return blocked(`read-only mode: '${tool}' is disabled`);
 			}
 			return undefined;
 		}
 
-		if (MODE !== "workspace-write") return undefined;
+		if (EFFECTIVE_MODE !== "workspace-write") return undefined;
 
 		if (WRITE_TOOLS.has(tool)) {
 			const raw = event.input?.path ?? event.input?.filePath;

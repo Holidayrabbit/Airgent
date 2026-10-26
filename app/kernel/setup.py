@@ -143,6 +143,27 @@ def _default_permissions_policy() -> dict:
     return {"ask_commands": [], "deny_commands": [], "deny_tools": []}
 
 
+def _has_tool_hooks(hooks_config: Path) -> bool:
+    """True when hooks.json declares before_tool/after_tool entries."""
+
+    if not hooks_config.is_file():
+        return False
+    try:
+        payload = json.loads(hooks_config.read_text(encoding="utf-8"))
+        hooks = payload.get("hooks") if isinstance(payload, dict) else None
+    except (OSError, json.JSONDecodeError):
+        return False
+    if not isinstance(hooks, dict):
+        return False
+    for kind in ("before_tool", "after_tool"):
+        entries = hooks.get(kind)
+        if isinstance(entries, list) and any(
+            isinstance(entry, dict) and entry.get("command") for entry in entries
+        ):
+            return True
+    return False
+
+
 _PERMISSION_MODES = {"off", "read-only", "workspace-write"}
 
 
@@ -284,6 +305,16 @@ def prepare_environment(settings: Settings) -> PiEnvironment:
         )
         deployed.append("airgent-mcp.ts")
 
+    if settings.hooks_enabled and _has_tool_hooks(settings.hooks_config):
+        _write_if_changed(
+            agent_dir / "extensions" / "airgent-tool-hooks.ts",
+            _render_extension(
+                "airgent-tool-hooks.ts",
+                {"__AIRGENT_HOOKS_CONFIG__": json.dumps(str(settings.hooks_config))},
+            ),
+        )
+        deployed.append("airgent-tool-hooks.ts")
+
     # Remove opt-in extensions that are no longer enabled so stale copies
     # never keep running with old config paths.
     optional = {
@@ -291,6 +322,7 @@ def prepare_environment(settings: Settings) -> PiEnvironment:
         "airgent-permissions.ts",
         "airgent-subagent.ts",
         "airgent-mcp.ts",
+        "airgent-tool-hooks.ts",
     }
     for name in optional - set(deployed):
         (agent_dir / "extensions" / name).unlink(missing_ok=True)
@@ -306,11 +338,12 @@ def prepare_environment(settings: Settings) -> PiEnvironment:
     )
 
 
-def build_spawn_env(settings: Settings) -> dict[str, str]:
+def build_spawn_env(settings: Settings, mode: str = "default") -> dict[str, str]:
     env = dict(os.environ)
     env["PI_CODING_AGENT_DIR"] = str(settings.pi_agent_dir)
     env["PI_CODING_AGENT_SESSION_DIR"] = str(settings.pi_session_dir)
     env["AIRGENT_SUBAGENT_DEPTH"] = "0"
+    env["AIRGENT_RUN_MODE"] = mode
     if settings.openai_base_url:
         # Proxy deployments must not accidentally use provider keys from the
         # outer environment; models.json carries the credential.

@@ -280,6 +280,26 @@ class LocalStore:
             for row in rows
         ]
 
+    def total_cost_usd(self) -> float:
+        """Cumulative recorded spend, summed from per-turn usage metadata."""
+
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT metadata_json FROM transcripts WHERE role = 'system'"
+            ).fetchall()
+        total = 0.0
+        for row in rows:
+            metadata = _loads_json_dict(row["metadata_json"])
+            if metadata.get("kind") != "usage":
+                continue
+            stats = metadata.get("stats")
+            if isinstance(stats, dict):
+                try:
+                    total += float(stats.get("cost_usd") or 0.0)
+                except (TypeError, ValueError):
+                    continue
+        return total
+
     def upsert_session(self, session_id: str, agent_key: str, *, title: str | None = None) -> None:
         now = utcnow()
         with self._connect() as connection:

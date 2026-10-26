@@ -18,6 +18,11 @@ def create_sandbox(settings: Settings) -> SandboxSpec:
         from app.sandbox.docker import docker_spec
 
         return docker_spec(settings)
+    if provider == "landlock":
+        from app.sandbox.landlock import landlock_spec
+
+        return landlock_spec(settings)
     raise SandboxError(
-        f"Unknown sandbox provider {provider!r}; expected none, seatbelt, or docker."
+        f"Unknown sandbox provider {provider!r}; "
+        "expected none, seatbelt, docker, or landlock."
     )
